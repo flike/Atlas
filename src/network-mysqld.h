@@ -239,6 +239,10 @@ typedef struct {
 	int limit;
 } merge_res_t;
 
+typedef struct {
+    guint32 stmt_id;
+    gchar *query;
+} stmt_params_t;
 /**
  * Encapsulates the state and callback functions for a MySQL protocol-based connection to and from MySQL Proxy.
  * 
@@ -364,6 +368,11 @@ struct network_mysqld_con {
 	merge_res_t* merge_res;
 
 	GString* challenge;
+    	GHashTable *stmt_hash_table;
+    	guint32 global_stmt_id;//for uniq stmt_id generateion
+    	guint32 close_stmt_id;//stmt_id in db
+    	guint32 proxy_stmt_id;//generate stmt_id in proxy
+    	guint32 execute_stmt_id;//stmt_id in execute state,and need to close
 };
 
 
@@ -374,6 +383,8 @@ NETWORK_API gboolean g_hash_table_true(gpointer UNUSED_PARAM(key), gpointer UNUS
 NETWORK_API network_mysqld_con *network_mysqld_con_new(void);
 NETWORK_API void network_mysqld_con_free(network_mysqld_con *con);
 
+NETWORK_API stmt_params_t* network_mysqld_stmt_params_new();
+NETWORK_API void network_mysqld_stmt_params_free(stmt_params_t *sp);
 /** 
  * should be socket 
  */

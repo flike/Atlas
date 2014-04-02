@@ -214,7 +214,8 @@ network_mysqld_con *network_mysqld_con_new() {
 	con->merge_res->rows = g_ptr_array_new();
 
 	con->challenge = g_string_sized_new(20);
-
+    	con->stmt_hash_table = g_hash_table_new_full(g_int_hash,g_int_equal,NULL,(GDestroyNotify)network_mysqld_stmt_params_free);
+    	con->global_stmt_id = 1;
 	return con;
 }
 
@@ -226,7 +227,19 @@ void network_mysqld_add_connection(chassis *srv, network_mysqld_con *con) {
 	g_mutex_unlock(&con_mutex);
 */
 }
+stmt_params_t* network_mysqld_stmt_params_new(int stmt_id) {
+	stmt_params_t *sp;
+	sp = g_new0(stmt_params_t, 1);
+    	sp->stmt_id = stmt_id;
+    	return sp;
+}
 
+void network_mysqld_stmt_params_free(stmt_params_t *sp) {
+    guint i;
+    if(!sp)return;
+    g_free(sp->query);
+    g_free(sp);
+}
 /**
  * free a connection 
  *
@@ -275,7 +288,10 @@ void network_mysqld_con_free(network_mysqld_con *con) {
 	}
 
 	if (con->challenge) g_string_free(con->challenge, TRUE);
-
+    	if (con->stmt_hash_table) {
+        	g_hash_table_remove_all(con->stmt_hash_table);
+        	g_hash_table_destroy(con->stmt_hash_table);
+    	}
 	g_free(con);
 }
 
@@ -285,6 +301,13 @@ static void dump_str(const char *msg, const unsigned char *s, size_t len) {
 	size_t i;
 		
        	hex = g_string_new(NULL);
+
+	for (i = 0; i < len; i++) {
+		g_string_append_printf(hex, "%02x", s[i]);
+
+		if ((i + 1) % 16 == 0) {
+			g_string_append(hex, "\n");
+		} else {
 
 	for (i = 0; i < len; i++) {
 		g_string_append_printf(hex, "%02x", s[i]);
@@ -1868,13 +1891,8 @@ int network_mysqld_con_send_resultset(network_socket *con, GPtrArray *fields, GP
 	 *    \0\0          - filler 
 	 *  \5\0\0\3 
 	 *    \376\0\0\2\0
-	 *  \35\0\0\4
-	 *    \34MySQL Community Server (GPL)
-	 *  \5\0\0\5
-	 *    \376\0\0\2\0
-	 */
-
-	network_mysqld_proto_append_lenenc_int(s, fields->len); /* the field-count */
+     */
+	network_mysqld_proto_append_lenenc_int(s, fields->len);
 	network_mysqld_queue_append(con, con->send_queue, S(s));
 
 	for (i = 0; i < fields->len; i++) {
