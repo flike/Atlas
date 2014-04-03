@@ -1208,7 +1208,10 @@ void check_flags(GPtrArray* tokens, network_mysqld_con* con) {
 			gchar* key = ts[4]->text->str;
 			if (!g_hash_table_lookup(con->locks, key)) g_hash_table_add(con->locks, g_strdup(key));
 		}
-
+		if (ts[1]->token_id == TK_SQL_LOCK)
+			con->is_lock_table = TRUE;
+		else if (ts[1]->token_id == TK_SQL_UNLOCK)
+			con->is_lock_table = FALSE;
 		if (len > 4) {	//SET AUTOCOMMIT = {0 | 1}
 			if (ts[1]->token_id == TK_SQL_SET && ts[3]->token_id == TK_EQ) {
 				if (strcasecmp(ts[2]->text->str, "AUTOCOMMIT") == 0) {
@@ -1526,7 +1529,7 @@ NETWORK_MYSQLD_PLUGIN_PROTO(proxy_read_query) {
 			if (con->server == NULL) {
 				int backend_ndx = -1;
 
-				if (!con->is_in_transaction && !con->is_not_autocommit && g_hash_table_size(con->locks) == 0) {
+				if (!con->is_in_transaction && !con->is_not_autocommit && !con->is_lock_table && g_hash_table_size(con->locks) == 0) {
 					if (type == COM_QUERY || type == COM_STMT_PREPARE) {
 						backend_ndx = rw_split(tokens, con);
 						//g_mutex_lock(&mutex);
@@ -2038,7 +2041,7 @@ NETWORK_MYSQLD_PLUGIN_PROTO(proxy_read_query_result) {
 
 				gboolean have_last_insert_id = inj->qstat.insert_id > 0;
 
-				if (!con->is_in_transaction && !con->is_not_autocommit && !con->is_in_select_calc_found_rows && !have_last_insert_id && g_hash_table_size(con->locks) == 0) network_connection_pool_lua_add_connection(con);
+				if (!con->is_in_transaction && !con->is_not_autocommit && !con->is_in_select_calc_found_rows && !have_last_insert_id && !con->is_lock_table && g_hash_table_size(con->locks) == 0) network_connection_pool_lua_add_connection(con);
 
 				++st->injected.sent_resultset;
 				if (st->injected.sent_resultset == 1) {
