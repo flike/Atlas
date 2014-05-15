@@ -266,6 +266,7 @@ int main_cmdline(int argc, char **argv) {
 
 	GError *gerr = NULL;
 	chassis_log *log = NULL;
+    gint i;
 
 	/* a little helper macro to set the src-location that we stepped out at to exit */
 #define GOTO_EXIT(status) \
@@ -493,7 +494,7 @@ int main_cmdline(int argc, char **argv) {
 		GOTO_EXIT(EXIT_FAILURE);
 	}
 
-	if (chassis_frontend_init_plugins(srv->modules,
+	/*if (chassis_frontend_init_plugins(srv->modules,
 				option_ctx,
 				&argc, &argv,
 				frontend->keyfile,
@@ -507,6 +508,7 @@ int main_cmdline(int argc, char **argv) {
 
 		GOTO_EXIT(EXIT_FAILURE);
 	}
+    */
 
 
 	/* if we only print the version numbers, exit and don't do any more work */
@@ -571,6 +573,23 @@ int main_cmdline(int argc, char **argv) {
 			/* we are the child, go on */
 		}
 	}
+    g_key_file_free(frontend->keyfile);
+    frontend->keyfile = NULL;
+    frontend->keyfile = g_key_file_new();
+    g_key_file_set_list_separator(frontend->keyfile, ',');
+    if (FALSE == g_key_file_load_from_file(frontend->keyfile, frontend->default_file, G_KEY_FILE_NONE, NULL)) {
+        GOTO_EXIT(EXIT_FAILURE);
+    }   
+    for (i = 0; i < srv->modules->len; i++) {
+        GOptionEntry *ce;
+        chassis_plugin *p = srv->modules->pdata[i];
+        if (NULL == (ce = chassis_plugin_get_options(p))) {
+            GOTO_EXIT(EXIT_FAILURE);
+        }   
+        if (chassis_keyfile_to_options(frontend->keyfile, "mysql-proxy", ce)){
+            GOTO_EXIT(EXIT_FAILURE);
+        }
+    } 
 #endif
 	if (frontend->pid_file && access(frontend->pid_file, F_OK)) {
 		if (0 != chassis_frontend_write_pidfile(frontend->pid_file, &gerr)) {

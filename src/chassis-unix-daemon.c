@@ -68,7 +68,7 @@ void chassis_unix_daemonize(void) {
 
 	if (fork() != 0) exit(0);
 	
-	chdir("/");
+	//chdir("/");
 	
 	umask(0);
 #endif
