@@ -1861,6 +1861,33 @@ void network_mysqld_con_accept(int G_GNUC_UNUSED event_fd, short events, void *u
 	return;
 }
 
+void network_mysqld_admin_con_accept(int G_GNUC_UNUSED event_fd, short events, void *user_data) {
+	network_mysqld_con *listen_con = user_data;
+	network_mysqld_con *client_con;
+	network_socket *client;
+    chassis* chas = listen_con->srv;
+
+	g_assert(events == EV_READ);
+	g_assert(listen_con->server);
+
+	client = network_socket_accept(listen_con->server);
+	if (!client) return;
+
+	/* looks like we open a client connection */
+	client_con = network_mysqld_con_new();
+	client_con->client = client;
+
+	NETWORK_MYSQLD_CON_TRACK_TIME(client_con, "accept");
+
+	network_mysqld_add_connection(listen_con->srv, client_con);
+	client_con->plugins = listen_con->plugins;
+	client_con->config  = listen_con->config;
+
+    chassis_event_thread_t *thread = chas->threads->pdata[0];
+    g_async_queue_push(thread->event_queue, client_con);
+    if (write(thread->notify_send_fd, "", 1) != 1) g_error("pipes - write error: %s", g_strerror(errno));
+	return;
+}
 /**
  * @todo move to network_mysqld_proto
  */
