@@ -1405,6 +1405,34 @@ int handle_stmt_close_packet(GString *packet,network_mysqld_con* con) {
 	con->state = CON_STATE_READ_QUERY;
 	return err;
 }
+
+int change_standby_to_master(network_mysqld_con *con) {
+        int i;
+        network_backend_t *standby, *item, *m_item, *s_item;
+        network_backends_t *bs = con->srv->priv->backends;
+        standby = network_standby_backend_get(con->srv->priv->backends);
+        if (standby != NULL && standby->state == BACKEND_STATE_UP) {
+                g_mutex_lock(bs->backends_mutex);
+                for (i = 0; i < bs->backends->len; i++) {
+                        item = g_ptr_array_index(bs->backends, i);
+                        if (item->type == BACKEND_TYPE_RW) {
+                                item->type = BACKEND_TYPE_SY;
+                                item->state = BACKEND_STATE_DOWN;
+                                m_item = item;
+                        } else if (item->type == BACKEND_TYPE_SY) {
+                                item->type = BACKEND_TYPE_RW;
+                                s_item = item;
+                        }
+                }
+                g_mutex_unlock(bs->backends_mutex);
+                g_message("%s:master(%s) is down, change standby(%s) to master.", G_STRLOC, m_item->addr->name->str, s_item->addr->name->str);
+        }else {
+                g_message("%s:have no standby master or standby master down,can't change master to standby",G_STRLOC);
+                return -1;
+        }
+        return 0;
+}
+
 /**
  * gets called after a query has been read
  *
@@ -1522,7 +1550,7 @@ NETWORK_MYSQLD_PLUGIN_PROTO(proxy_read_query) {
 
 				    g_ptr_array_free(sqls, TRUE);
 				}
-            		}
+            }
 
 			check_flags(tokens, con);
 
@@ -1532,10 +1560,16 @@ NETWORK_MYSQLD_PLUGIN_PROTO(proxy_read_query) {
 				if (!con->is_in_transaction && !con->is_not_autocommit && !con->is_lock_table && g_hash_table_size(con->locks) == 0) {
 					if (type == COM_QUERY || type == COM_STMT_PREPARE) {
 						backend_ndx = rw_split(tokens, con);
-						//g_mutex_lock(&mutex);
 						send_sock = network_connection_pool_lua_swap(con, backend_ndx);
-						//g_mutex_unlock(&mutex);
-					} else if (type == COM_INIT_DB || type == COM_SET_OPTION) {
+                                                if (send_sock == NULL) {
+                                                        network_backend_t *backend = network_backends_get(con->srv->priv->backends, backend_ndx);
+                                                        if (backend->type == BACKEND_TYPE_RW) {
+                                                                if (errno == ECONNREFUSED) {
+                                                                        change_standby_to_master(con);
+                                                                }
+                                                        }
+                                                }
+                    } else if (type == COM_INIT_DB || type == COM_SET_OPTION) {
 						backend_ndx = wrr_ro(con);
 						//g_mutex_lock(&mutex);
 						send_sock = network_connection_pool_lua_swap(con, backend_ndx);
@@ -2394,7 +2428,10 @@ void network_mysqld_proxy_plugin_free(chassis_plugin_config *config) {
 		}
 		g_free(config->backend_addresses);
 	}
-
+    
+        if (config->master_standby_addresses) {
+                g_strfreev(config->master_standby_addresses);
+        }
 	if (config->address) {
 		/* free the global scope */
 		network_mysqld_proxy_free(NULL);
@@ -2460,7 +2497,7 @@ static GOptionEntry * network_mysqld_proxy_plugin_get_options(chassis_plugin_con
 		{ "proxy-read-only-backend-addresses", 
 					      'r', 0, G_OPTION_ARG_STRING_ARRAY, NULL, "address:port of the remote slave-server (default: not set)", "<host:port>" },
 		{ "proxy-backend-addresses",  'b', 0, G_OPTION_ARG_STRING_ARRAY, NULL, "address:port of the remote backend-servers (default: 127.0.0.1:3306)", "<host:port>" },
-		
+		{ "proxy-master-standby-address",  0, 0, G_OPTION_ARG_STRING_ARRAY, NULL, "address:port of the remote master-standby-servers ", "<host:port>" },
 		{ "proxy-skip-profiling",     0, G_OPTION_FLAG_REVERSE, G_OPTION_ARG_NONE, NULL, "disables profiling of queries (default: enabled)", NULL },
 
 		{ "proxy-fix-bug-25371",      0, 0, G_OPTION_ARG_NONE, NULL, "fix bug #25371 (mysqld > 5.1.12) for older libmysql versions", NULL },
@@ -2489,6 +2526,7 @@ static GOptionEntry * network_mysqld_proxy_plugin_get_options(chassis_plugin_con
 	config_entries[i++].arg_data = &(config->address);
 	config_entries[i++].arg_data = &(config->read_only_backend_addresses);
 	config_entries[i++].arg_data = &(config->backend_addresses);
+	config_entries[i++].arg_data = &(config->master_standby_addresses);
 
 	config_entries[i++].arg_data = &(config->profiling);
 
@@ -2645,6 +2683,11 @@ int network_mysqld_proxy_plugin_apply_config(chassis *chas, chassis_plugin_confi
 	
 	for (i = 0; config->read_only_backend_addresses && config->read_only_backend_addresses[i]; i++) {
 		if (-1 == network_backends_add(g->backends, config->read_only_backend_addresses[i], BACKEND_TYPE_RO)) {
+			return -1;
+		}
+	}
+	for (i = 0; config->master_standby_addresses && config->master_standby_addresses[i]; i++) {
+		if (-1 == network_backends_add(g->backends, config->master_standby_addresses[i], BACKEND_TYPE_SY)) {
 			return -1;
 		}
 	}

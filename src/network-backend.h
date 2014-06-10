@@ -41,7 +41,8 @@ typedef enum {
 typedef enum { 
 	BACKEND_TYPE_UNKNOWN, 
 	BACKEND_TYPE_RW, 
-	BACKEND_TYPE_RO
+	BACKEND_TYPE_RO,
+        BACKEND_TYPE_SY
 } backend_type_t;
 
 typedef struct {
@@ -87,6 +88,7 @@ NETWORK_API int network_backends_remove(network_backends_t *backends, guint inde
 NETWORK_API int network_backends_check(network_backends_t *backends);
 NETWORK_API network_backend_t * network_backends_get(network_backends_t *backends, guint ndx);
 NETWORK_API guint network_backends_count(network_backends_t *backends);
+NETWORK_API network_backend_t* network_standby_backend_get(network_backends_t *bs);
 
 NETWORK_API g_wrr_poll *g_wrr_poll_new();
 NETWORK_API void g_wrr_poll_free(g_wrr_poll *global_wrr);

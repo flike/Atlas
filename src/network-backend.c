@@ -158,18 +158,14 @@ int network_backends_add(network_backends_t *bs, /* const */ gchar *address, bac
 	gint first_slave = -1;
 	for (i = 0; i < bs->backends->len; i++) {
 		network_backend_t *old_backend = bs->backends->pdata[i];
-
 		if (first_slave == -1 && old_backend->type == BACKEND_TYPE_RO) first_slave = i;
-
 		if (old_backend->type == type && strleq(S(old_backend->addr->name), S(new_backend->addr->name))) {
 			network_backend_free(new_backend);
-
 			g_mutex_unlock(bs->backends_mutex);	/*remove lock*/
 			g_critical("backend %s is already known!", address);
 			return -1;
 		}
 	}
-
 	g_ptr_array_add(bs->backends, new_backend);
 	if (first_slave != -1 && type == BACKEND_TYPE_RW) {
 		network_backend_t *temp_backend = bs->backends->pdata[first_slave];
@@ -177,9 +173,12 @@ int network_backends_add(network_backends_t *bs, /* const */ gchar *address, bac
 		bs->backends->pdata[bs->backends->len - 1] = temp_backend;
 	}
 	g_mutex_unlock(bs->backends_mutex);	/*remove lock*/
-
-	g_message("added %s backend: %s", (type == BACKEND_TYPE_RW) ?
-			"read/write" : "read-only", address);
+        if (type == BACKEND_TYPE_RW)
+                g_message("added %s backend: %s","read/write",address);
+        else if (type == BACKEND_TYPE_RO)
+                g_message("added %s backend: %s","read-only",address);
+        else
+                g_message("added %s backend: %s","master-standby",address);
 
 	return 0;
 }
@@ -201,3 +200,18 @@ guint network_backends_count(network_backends_t *bs) {
 	return len;
 }
 
+network_backend_t* network_standby_backend_get(network_backends_t *bs) {
+        int i, len;
+        network_backend_t *item = NULL;
+        g_mutex_lock(bs->backends_mutex);
+        len = bs->backends->len;
+        for (i = 0; i < len; i++) {
+                item = bs->backends->pdata[i];
+                if (item->type == BACKEND_TYPE_SY) {
+                        g_mutex_unlock(bs->backends_mutex);
+                        return item;
+                }
+        }
+        g_mutex_unlock(bs->backends_mutex);
+        return NULL;
+}

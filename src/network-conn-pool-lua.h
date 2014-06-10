@@ -32,7 +32,7 @@ struct chassis_plugin_config {
 
 	gchar **backend_addresses;        /**< read-write backends */
 	gchar **read_only_backend_addresses; /**< read-only  backends */
-
+        gchar **master_standby_addresses; 
 	gint fix_bug_25371;               /**< suppress the second ERR packet of bug #25371 */
 
 	gint profiling;                   /**< skips the execution of the read_query() function */
