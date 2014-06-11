@@ -541,7 +541,8 @@ int wrr_ro(network_mysqld_con *con) {
 	network_backends_t* backends = con->srv->priv->backends;
 	g_wrr_poll* rwsplit = backends->global_wrr;
 	guint ndx_num = network_backends_count(backends);
-
+        if (rwsplit->next_ndx >= network_backends_count(backends))
+                rwsplit->next_ndx = 0;
 	// set max weight if no init
 	if (rwsplit->max_weight == 0) {
 		for(i = 0; i < ndx_num; ++i) {
@@ -1563,13 +1564,13 @@ NETWORK_MYSQLD_PLUGIN_PROTO(proxy_read_query) {
 						send_sock = network_connection_pool_lua_swap(con, backend_ndx);
                                                 if (send_sock == NULL) {
                                                         network_backend_t *backend = network_backends_get(con->srv->priv->backends, backend_ndx);
-                                                        if (backend->type == BACKEND_TYPE_RW) {
+                                                        if (backend && backend->type == BACKEND_TYPE_RW) {
                                                                 if (errno == ECONNREFUSED) {
                                                                         change_standby_to_master(con);
                                                                 }
                                                         }
                                                 }
-                    } else if (type == COM_INIT_DB || type == COM_SET_OPTION) {
+                    } else if (type == COM_INIT_DB || type == COM_SET_OPTION || type == COM_FIELD_LIST) {
 						backend_ndx = wrr_ro(con);
 						//g_mutex_lock(&mutex);
 						send_sock = network_connection_pool_lua_swap(con, backend_ndx);
