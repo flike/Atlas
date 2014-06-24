@@ -203,6 +203,14 @@ function read_query(packet)
 				  type = proxy.MYSQL_TYPE_STRING },
 			}
 		end
+        elseif string.find(query:lower(), "^save%s+config+$") then                                                                   
+                if proxy.global.config.rwsplit then proxy.global.config.rwsplit.max_weight = -1 end 
+                local newserver = string.match(query:lower(), "^save%s+config+$");
+                proxy.global.backends.saveconfig = newserver
+                fields = { 
+                        { name = "status",
+                        type = proxy.MYSQL_TYPE_STRING },
+                }  
 	elseif string.find(query:lower(), "^select%s+*%s+from%s+help$") then
 		fields = { 
 			{ name = "command", 
@@ -215,9 +223,10 @@ function read_query(packet)
 		rows[#rows + 1] = { "SET OFFLINE $backend_id", "offline backend server, $backend_id is backend_ndx's id" }
 		rows[#rows + 1] = { "SET ONLINE $backend_id", "online backend server, ..." }
 		rows[#rows + 1] = { "ADD MASTER $backend", "example: \"add master 127.0.0.1:3306\", ..." }
-		rows[#rows + 1] = { "ADD SLAVE $backend", "example: \"add slave 127.0.0.1:3306\", ..." }
-		rows[#rows + 1] = { "ADD STANDBY $backend", "example: \"add standby 127.0.0.1:3306\", ..." }
+                rows[#rows + 1] = { "ADD SLAVE $backend", "example: \"add slave 127.0.0.1:3306\", ..." }
+                rows[#rows + 1] = { "ADD STANDBY $backend", "example: \"add standby 127.0.0.1:3306\", ..." }
                 rows[#rows + 1] = { "REMOVE BACKEND $backend_id", "example: \"remove backend 1\", ..." }
+                rows[#rows + 1] = { "SAVE CONFIG", "save the backends to config file" }
 	else
 		set_error("use 'SELECT * FROM help' to see the supported commands")
 		return proxy.PROXY_SEND_RESULT

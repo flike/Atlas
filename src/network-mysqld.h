@@ -417,7 +417,7 @@ struct chassis_private {
 	network_backends_t *backends;
 };
 
-NETWORK_API int network_mysqld_init(chassis *srv);
+NETWORK_API int network_mysqld_init(chassis *srv, gchar* config_path);
 NETWORK_API void network_mysqld_add_connection(chassis *srv, network_mysqld_con *con);
 NETWORK_API void network_mysqld_con_handle(int event_fd, short events, void *user_data);
 NETWORK_API int network_mysqld_queue_append(network_socket *sock, network_queue *queue, const char *data, size_t len);

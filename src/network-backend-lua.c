@@ -153,9 +153,13 @@ static int proxy_backends_set(lua_State *L) {
         	network_backends_add(bs, g_strdup(lua_tostring(L, -1)), BACKEND_TYPE_RO);
 	} else if (strleq(key, keysize, C("addmaster"))) {
         	network_backends_add(bs, g_strdup(lua_tostring(L, -1)), BACKEND_TYPE_RW);
+	} else if (strleq(key, keysize, C("addstandby"))) {
+        	network_backends_add(bs, g_strdup(lua_tostring(L, -1)), BACKEND_TYPE_SY);
 	} else if (strleq(key, keysize, C("removebackend"))) {
         	network_backends_remove(bs, lua_tointeger(L, -1));
-	} else {
+	} else if (strleq(key, keysize, C("saveconfig"))) {
+                network_backends_save_to_config(bs, bs->config_path);
+        } else {
 		return luaL_error(L, "proxy.global.backends.%s is not writable", key);
 	}
 	return 1;

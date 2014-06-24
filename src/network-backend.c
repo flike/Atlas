@@ -66,7 +66,7 @@ void network_backend_free(network_backend_t *b) {
 	g_free(b);
 }
 
-network_backends_t *network_backends_new(guint event_thread_count) {
+network_backends_t *network_backends_new(guint event_thread_count, gchar* config_path) {
 	network_backends_t *bs;
 
 	bs = g_new0(network_backends_t, 1);
@@ -75,6 +75,7 @@ network_backends_t *network_backends_new(guint event_thread_count) {
 	bs->backends_mutex = g_mutex_new();	/*remove lock*/
 	bs->global_wrr = g_wrr_poll_new();
 	bs->event_thread_count = event_thread_count;
+        bs->config_path = g_strdup(config_path);
 
 	return bs;
 }
@@ -110,7 +111,7 @@ void network_backends_free(network_backends_t *bs) {
 
 	g_ptr_array_free(bs->backends, TRUE);
 	g_mutex_free(bs->backends_mutex);	/*remove lock*/
-
+        g_free(bs->config_path);
 	g_wrr_poll_free(bs->global_wrr);
 	g_free(bs);
 }
@@ -215,3 +216,90 @@ network_backend_t* network_standby_backend_get(network_backends_t *bs) {
         g_mutex_unlock(bs->backends_mutex);
         return NULL;
 }
+
+int network_backends_save_to_config(network_backends_t *bs, gchar* config_path) {
+        int i, len, file_size = 0, first_append_master = 1, first_append_slave = 1, first_append_standby = 1;
+        GKeyFile* keyfile;
+        network_backend_t *backend;
+        GString *master, *slave, *standby;
+        GError *gerr = NULL;
+        gchar* file_buf = NULL;
+
+        master = g_string_new(NULL);
+        slave = g_string_new(NULL);
+        standby = g_string_new(NULL);
+        keyfile = g_key_file_new();
+        g_key_file_set_list_separator(keyfile, ',');
+        if (FALSE == g_key_file_load_from_file(keyfile, config_path, G_KEY_FILE_NONE, NULL)) {
+                g_message("%s:load %s error,load config file failed", G_STRLOC, config_path);
+                g_string_free(master, TRUE);
+                g_string_free(slave, TRUE);
+                g_string_free(standby, TRUE);
+                g_key_file_free(keyfile);
+                return -1;
+        }
+        g_mutex_lock(bs->backends_mutex);
+        len = bs->backends->len;
+        for (i = 0; i < len; i++) {
+                backend = g_ptr_array_index(bs->backends, i);
+                if (backend->type == BACKEND_TYPE_RW) {
+                        if (first_append_master) {
+                                g_string_append(master, backend->addr->name->str);
+                                first_append_master = 0;
+                        } else {
+                                g_string_append_c(master, ',');
+                                g_string_append(master, backend->addr->name->str);
+                        }
+                } else if (backend->type == BACKEND_TYPE_RO) {
+                        if (first_append_slave) {
+                                g_string_append(slave, backend->addr->name->str);
+                                first_append_slave = 0;
+                        } else {
+                                g_string_append_c(slave, ',');
+                                g_string_append(slave, backend->addr->name->str);
+                        }
+                } else if (backend->type == BACKEND_TYPE_SY) {
+                        if (first_append_standby) {
+                                g_string_append(standby, backend->addr->name->str);
+                                first_append_standby = 0;
+                        } else {
+                                g_string_append_c(standby, ',');
+                                g_string_append(standby, backend->addr->name->str);
+                        }
+                }
+        }
+        g_mutex_unlock(bs->backends_mutex);
+        if (master->len != 0)
+                g_key_file_set_string(keyfile, "mysql-proxy", "proxy-backend-addresses", master->str);
+        else
+                g_key_file_set_string(keyfile, "mysql-proxy", "proxy-backend-addresses", "");
+
+        if (slave->len != 0)
+                g_key_file_set_string(keyfile, "mysql-proxy", "proxy-read-only-backend-addresses", slave->str);
+        else
+                g_key_file_set_string(keyfile, "mysql-proxy", "proxy-read-only-backend-addresses", "");
+
+        if (standby->len != 0)
+                g_key_file_set_string(keyfile, "mysql-proxy", "proxy-master-standby-address", standby->str);
+        else
+                g_key_file_set_string(keyfile, "mysql-proxy", "proxy-master-standby-address", "");
+        file_buf = g_key_file_to_data(keyfile, &file_size, &gerr);
+        if (file_buf) {
+                if (FALSE == g_file_set_contents(config_path, file_buf, file_size, &gerr)) {
+                        g_message("%s:g_file_set_contents, gerr is:%s", G_STRLOC, gerr->message);
+                        g_error_free(gerr);
+                        gerr = NULL;
+                        g_message("%s:save to config failure", G_STRLOC);
+                } else {
+                        g_message("%s:save to config success", G_STRLOC);
+                }
+                g_free(file_buf);
+        } else {
+                g_message("%s:save to config failure", G_STRLOC); 
+        }
+        g_string_free(master, TRUE);
+        g_string_free(slave, TRUE);
+        g_string_free(standby, TRUE);
+        g_key_file_free(keyfile);
+        return 0;
+}                          
