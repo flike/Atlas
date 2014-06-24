@@ -56,7 +56,7 @@ typedef struct {
 //	network_connection_pool *pool; /**< the pool of open connections */
 	GPtrArray *pools;
 
-	guint connected_clients; /**< number of open connections to this backend for SQF */
+	gint connected_clients; /**< number of open connections to this backend for SQF */
 
 	GString *uuid;           /**< the UUID of the backend */
 
@@ -75,7 +75,8 @@ typedef struct {
 typedef struct {
 	GPtrArray *backends;
 	GMutex    *backends_mutex;	/*remove lock*/
-	
+        GPtrArray *recycle_backends;
+        
 //	GTimeVal backend_last_check;
 	g_wrr_poll *global_wrr;
 	guint event_thread_count;

@@ -2242,7 +2242,8 @@ NETWORK_MYSQLD_PLUGIN_PROTO(proxy_disconnect_client) {
 		luaL_unref(sc->L, LUA_REGISTRYINDEX, st->L_ref);
 	}
 #endif
-
+        if (st->backend)
+                g_atomic_int_dec_and_test(&(st->backend->connected_clients));
 	network_mysqld_con_lua_free(st);
 
 	con->plugin_con_state = NULL;

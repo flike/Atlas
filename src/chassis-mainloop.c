@@ -48,6 +48,7 @@
 #include "chassis-log.h"
 #include "chassis-stats.h"
 #include "chassis-timings.h"
+#include "network-backend.h"
 
 #ifdef _WIN32
 static volatile int signal_shutdown;
@@ -243,11 +244,93 @@ static void event_log_use_glib(int libevent_log_level, const char *msg) {
 	g_log(G_LOG_DOMAIN, glib_log_level, "(libevent) %s", msg);
 }
 
+int load_keyfile_to_options(GKeyFile *keyfile, const gchar *ini_group_name, chassis *chas) {
+        GError *gerr = NULL;
+        chassis_private *g = chas->priv;
+        gchar **arg_string_array;
+        int i, j, array_size, count;
+        gsize len;
+        gchar* reload_items[] = {"proxy-backend-addresses", "proxy-read-only-backend-addresses", "proxy-master-standby-address"};
+
+        g_mutex_lock(g->backends->backends_mutex);
+        count = g->backends->backends->len;
+        for (i = 0; i < count; i++) {
+                network_backends_remove_unlock(g->backends, 0);/*erase the whole always from the index of zero*/
+        }
+        array_size = sizeof(reload_items) / sizeof(gchar*);
+        if (!keyfile) {
+                g_mutex_unlock(g->backends->backends_mutex);
+                return -1;
+        }
+        if (!g_key_file_has_group(keyfile, ini_group_name)) {
+                g_mutex_unlock(g->backends->backends_mutex);
+                return 0;
+        }
+
+        for (i = 0;i < array_size; i++) {
+                if (!g_key_file_has_key(keyfile, ini_group_name, reload_items[i], &gerr)) continue;
+                arg_string_array = g_key_file_get_string_list(keyfile, ini_group_name, reload_items[i], &len, &gerr);
+                if (!gerr) {
+                        for (j = 0; arg_string_array[j]; j++) {
+                                arg_string_array[j] = g_strstrip(arg_string_array[j]);
+                                switch (i) {
+                                        case 0:
+                                                network_backends_add_unlock(g->backends, arg_string_array[j], BACKEND_TYPE_RW);
+                                                break;
+                                        case 1:
+                                                network_backends_add_unlock(g->backends, arg_string_array[j], BACKEND_TYPE_RO);
+                                                break;
+                                        case 2:
+                                                network_backends_add_unlock(g->backends, arg_string_array[j], BACKEND_TYPE_SY);
+                                                break;
+                                }
+                        }
+                        g_strfreev(arg_string_array);
+                } else {
+                        g_message("%s:load keyfile_to options fail, gerr is :%s", G_STRLOC, gerr->message);
+                        g_error_free(gerr);
+                        gerr = NULL;
+                        g_mutex_unlock(g->backends->backends_mutex);
+                        return -1;
+                }
+        }
+        for (i = 0; i < g->backends->backends->len; i++ ) {
+                network_backend_t* b = g_ptr_array_index(g->backends->backends, i);
+                b->state = BACKEND_STATE_UP;
+        }
+        g_mutex_unlock(g->backends->backends_mutex);
+        return 0;
+}
+
+/*
+ *only reload the following configuration items:
+ *proxy-backend-addresses
+ *proxy-read-only-backend-addresses
+ *proxy-master-standby-address
+ */
+void reload_config_handler(int G_GNUC_UNUSED fd, short G_GNUC_UNUSED event_type, void *_data) {
+        chassis *chas = _data;
+        GKeyFile *keyfile = g_key_file_new();
+        g_key_file_set_list_separator(keyfile, ',');
+        g_message("%s:recieved a SIGSYS,reload config file", G_STRLOC);
+        if (FALSE == g_key_file_load_from_file(keyfile, chas->priv->backends->config_path, G_KEY_FILE_NONE, NULL)) {
+                g_message("%s:load %s error,reload config file failed", G_STRLOC, chas->priv->backends->config_path);
+                g_key_file_free(keyfile);
+                return;
+        }   
+        chassis_plugin *p = chas->modules->pdata[1];/*proxy-plugin*/
+        if (-1 == load_keyfile_to_options(keyfile, "mysql-proxy", chas)){
+                g_message("%s:load_keyfile_to_options error", G_STRLOC);
+                g_key_file_free(keyfile);
+                return;
+        }
+        g_key_file_free(keyfile);
+}
 
 int chassis_mainloop(void *_chas) {
 	chassis *chas = _chas;
 	guint i;
-	struct event ev_sigterm, ev_sigint;
+	struct event ev_sigterm, ev_sigint, ev_sigsys;
 #ifdef SIGHUP
 	struct event ev_sighup;
 #endif
@@ -326,7 +409,10 @@ int chassis_mainloop(void *_chas) {
 	signal_set(&ev_sigint, SIGINT, sigterm_handler, NULL);
 	event_base_set(chas->event_base, &ev_sigint);
 	signal_add(&ev_sigint, NULL);
-
+        
+        signal_set(&ev_sigsys, SIGSYS, reload_config_handler, chas);
+        event_base_set(chas->event_base, &ev_sigsys);
+        signal_add(&ev_sigsys, NULL);
 #ifdef SIGHUP
 	signal_set(&ev_sighup, SIGHUP, sighup_handler, chas);
 	event_base_set(chas->event_base, &ev_sighup);
@@ -342,14 +428,14 @@ int chassis_mainloop(void *_chas) {
 	 * - dup the async-queue-ping-fds
 	 * - setup the events notification
 	 * */
-	for (i = 1; i < (guint)chas->event_thread_count; i++) { /* we already have 1 event-thread running, the main-thread */
+	for (i = 1; i <= (guint)chas->event_thread_count; i++) { /* we already have 1 event-thread running, the main-thread */
 		chassis_event_thread_t *thread = chassis_event_thread_new(i);
 		chassis_event_threads_init_thread(thread, chas);
 		g_ptr_array_add(chas->threads, thread);
 	}
 
 	/* start the event threads */
-	if (chas->event_thread_count > 1) {
+	if (chas->event_thread_count >= 1) {
 		chassis_event_threads_start(chas->threads);
 	}
 
@@ -362,6 +448,7 @@ int chassis_mainloop(void *_chas) {
 
 	signal_del(&ev_sigterm);
 	signal_del(&ev_sigint);
+        signal_del(&ev_sigsys);
 #ifdef SIGHUP
 	signal_del(&ev_sighup);
 #endif

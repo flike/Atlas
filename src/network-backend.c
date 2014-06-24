@@ -39,7 +39,7 @@ network_backend_t *network_backend_new(guint event_thread_count) {
 //	b->pool = network_connection_pool_new();
 	b->pools = g_ptr_array_new();
 	guint i;
-	for (i = 0; i < event_thread_count; ++i) {
+	for (i = 0; i <= event_thread_count; ++i) {
 		network_connection_pool* pool = network_connection_pool_new();
 		g_ptr_array_add(b->pools, pool);
 	}
@@ -76,6 +76,7 @@ network_backends_t *network_backends_new(guint event_thread_count, gchar* config
 	bs->global_wrr = g_wrr_poll_new();
 	bs->event_thread_count = event_thread_count;
         bs->config_path = g_strdup(config_path);
+        bs->recycle_backends = g_ptr_array_new();
 
 	return bs;
 }
@@ -110,29 +111,67 @@ void network_backends_free(network_backends_t *bs) {
 	g_mutex_unlock(bs->backends_mutex);	/*remove lock*/
 
 	g_ptr_array_free(bs->backends, TRUE);
-	g_mutex_free(bs->backends_mutex);	/*remove lock*/
+        for (i = 0; i < bs->recycle_backends->len; i++) {
+                network_backend_t * b = g_ptr_array_index(bs->recycle_backends, i);  
+                network_backend_free(b);
+        }    
+        g_ptr_array_free(bs->recycle_backends, TRUE);  
+	
+        g_mutex_free(bs->backends_mutex);	/*remove lock*/
         g_free(bs->config_path);
 	g_wrr_poll_free(bs->global_wrr);
 	g_free(bs);
 }
 
 int network_backends_remove(network_backends_t *bs, guint index) {
-	network_backend_t* b = bs->backends->pdata[index];
-	if (b != NULL) {
-		if (b->addr) network_address_free(b->addr);
-		if (b->uuid) g_string_free(b->uuid, TRUE);
-		g_mutex_lock(bs->backends_mutex);
-		g_ptr_array_remove_index(bs->backends, index);
-		g_mutex_unlock(bs->backends_mutex);
-	}
-	return 0;
+        int ret;
+        g_mutex_lock(bs->backends_mutex);
+        ret = network_backends_remove_unlock(bs, index);
+        g_mutex_unlock(bs->backends_mutex);
+        return ret;
 }
 
+int network_backends_remove_unlock(network_backends_t *bs, guint index) {
+        int i;
+        network_backend_t* item = NULL;
+        if (index >= bs->backends->len) {
+                g_message("%s:network_backends_remove error,the index is out the length of array", G_STRLOC);
+                return -1;
+        }
+        item = g_ptr_array_index(bs->backends, index);
+        if (item != NULL) {
+                if (item->connected_clients == 0) {
+                        network_backend_free(item);
+                        g_ptr_array_remove_index(bs->backends, index);
+                } else if (item->connected_clients > 0) {
+                        for (i = 0; i < bs->recycle_backends->len; i++) {
+                                network_backend_t * b = g_ptr_array_index(bs->recycle_backends, i);
+                                if (b->connected_clients == 0) {
+                                        network_backend_free(b);
+                                        g_ptr_array_remove_index(bs->recycle_backends, i);
+                                }
+                        }
+                        g_ptr_array_add(bs->recycle_backends, item);
+                        g_ptr_array_remove_index(bs->backends, index);
+                } else {
+                        g_message("%s:network_backends_remove error, connected_clients less than 0", G_STRLOC);
+                }
+        }
+        return 0;
+}
+
+int network_backends_add(network_backends_t *bs, gchar *address, backend_type_t type) {
+        int ret;
+        g_mutex_lock(bs->backends_mutex);
+        ret = network_backends_add_unlock(bs, address, type);
+        g_mutex_unlock(bs->backends_mutex);
+        return ret;
+}
 /*
  * FIXME: 1) remove _set_address, make this function callable with result of same
  *        2) differentiate between reasons for "we didn't add" (now -1 in all cases)
  */
-int network_backends_add(network_backends_t *bs, /* const */ gchar *address, backend_type_t type) {
+int network_backends_add_unlock(network_backends_t *bs, /* const */ gchar *address, backend_type_t type) {
 	network_backend_t *new_backend;
 	guint i;
 
@@ -155,14 +194,14 @@ int network_backends_add(network_backends_t *bs, /* const */ gchar *address, bac
 	}
 
 	/* check if this backend is already known */
-	g_mutex_lock(bs->backends_mutex);	/*remove lock*/
+	//g_mutex_lock(bs->backends_mutex);	/*remove lock*/
 	gint first_slave = -1;
 	for (i = 0; i < bs->backends->len; i++) {
 		network_backend_t *old_backend = bs->backends->pdata[i];
 		if (first_slave == -1 && old_backend->type == BACKEND_TYPE_RO) first_slave = i;
 		if (old_backend->type == type && strleq(S(old_backend->addr->name), S(new_backend->addr->name))) {
 			network_backend_free(new_backend);
-			g_mutex_unlock(bs->backends_mutex);	/*remove lock*/
+			//g_mutex_unlock(bs->backends_mutex);	/*remove lock*/
 			g_critical("backend %s is already known!", address);
 			return -1;
 		}
@@ -173,7 +212,7 @@ int network_backends_add(network_backends_t *bs, /* const */ gchar *address, bac
 		bs->backends->pdata[first_slave] = bs->backends->pdata[bs->backends->len - 1];
 		bs->backends->pdata[bs->backends->len - 1] = temp_backend;
 	}
-	g_mutex_unlock(bs->backends_mutex);	/*remove lock*/
+	//g_mutex_unlock(bs->backends_mutex);	/*remove lock*/
         if (type == BACKEND_TYPE_RW)
                 g_message("added %s backend: %s","read/write",address);
         else if (type == BACKEND_TYPE_RO)
@@ -185,10 +224,12 @@ int network_backends_add(network_backends_t *bs, /* const */ gchar *address, bac
 }
 
 network_backend_t *network_backends_get(network_backends_t *bs, guint ndx) {
-	if (ndx >= network_backends_count(bs)) return NULL;
-
-	/* FIXME: shouldn't we copy the backend or add ref-counting ? */	
-	return bs->backends->pdata[ndx];
+        network_backend_t *item = NULL;
+        g_mutex_lock(bs->backends_mutex);       /*remove lock*/         
+        if (ndx < bs->backends->len) 
+                item = bs->backends->pdata[ndx];
+        g_mutex_unlock(bs->backends_mutex);     /*remove lock*/
+        return item;
 }
 
 guint network_backends_count(network_backends_t *bs) {
