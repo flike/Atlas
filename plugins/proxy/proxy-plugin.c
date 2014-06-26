@@ -541,7 +541,7 @@ int wrr_ro(network_mysqld_con *con) {
 	network_backends_t* backends = con->srv->priv->backends;
 	g_wrr_poll* rwsplit = backends->global_wrr;
 	guint ndx_num = network_backends_count(backends);
-        if (rwsplit->next_ndx >= network_backends_count(backends))
+        if (rwsplit->next_ndx >= ndx_num)
                 rwsplit->next_ndx = 0;
 	// set max weight if no init
 	if (rwsplit->max_weight == 0) {
@@ -571,7 +571,7 @@ int wrr_ro(network_mysqld_con *con) {
 		if (backend->type == BACKEND_TYPE_RO && backend->weight >= cur_weight && backend->state == BACKEND_STATE_UP) ndx = next_ndx;
 
 	next:
-		if (next_ndx == ndx_num - 1) {
+		if (next_ndx >= ndx_num - 1) {
 			--cur_weight;
 			next_ndx = 0;
 
