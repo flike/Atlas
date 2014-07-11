@@ -47,7 +47,8 @@ struct chassis_plugin_config {
 	gint start_proxy;
 
 	gchar **client_ips;
-	GHashTable *ip_table;
+        GHashTable *ip_table[2];
+        gint iptable_index;
 
 	gchar **lvs_ips;
 	GHashTable *lvs_table;
@@ -56,7 +57,8 @@ struct chassis_plugin_config {
 	GHashTable *dt_table;
 
 	gchar **pwds;
-	GHashTable *pwd_table;
+	GHashTable *pwd_table[2];
+        gint pwdtable_index;
 
 	network_mysqld_con *listen_con;
 

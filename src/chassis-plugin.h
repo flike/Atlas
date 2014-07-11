@@ -60,7 +60,8 @@ typedef struct chassis_plugin {
 	GOptionEntry * (*get_options)(chassis_plugin_config *user_data); /**< handler function to obtain the command line argument information */
 	int      (*apply_config)(chassis *chas, chassis_plugin_config * user_data); /**< handler function to set the argument values in the plugin's config */
     void*    (*get_global_state)(chassis_plugin_config *user_data, const char* member);     /**< handler function to retrieve the plugin's global state */
-    
+   int (*insert_pwds)(gchar** arg_string_array, chassis_plugin_config *config);
+   void (*insert_clientips)(gchar** arg_string_array, chassis_plugin_config *config); 
 } chassis_plugin;
 
 CHASSIS_API chassis_plugin *chassis_plugin_init(void) G_GNUC_DEPRECATED;

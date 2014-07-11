@@ -155,7 +155,7 @@ network_socket *self_connect(network_mysqld_con *con, network_backend_t *backend
 	//2. read handshake，重点是获取20个字节的随机串
 	off_t to_read = NET_HEADER_SIZE;
 	guint offset = 0;
-	char header[NET_HEADER_SIZE];
+	guchar header[NET_HEADER_SIZE];
 	while (to_read > 0) {
 		gssize len = recv(sock->fd, header + offset, to_read, 0);
 		if (len == -1 || len == 0) {
@@ -189,7 +189,8 @@ network_socket *self_connect(network_mysqld_con *con, network_backend_t *backend
 
 	//3. 生成response
 	GString *response = g_string_sized_new(20);
-	GString *hashed_password = g_hash_table_lookup(con->config->pwd_table, con->client->response->username->str);
+        GString *hashed_password = NULL;
+        hashed_password = g_hash_table_lookup(con->config->pwd_table[con->config->pwdtable_index], con->client->response->username->str);
 	if (hashed_password) {
 		network_mysqld_proto_password_scramble(response, S(challenge->challenge), S(hashed_password));
 	} else {

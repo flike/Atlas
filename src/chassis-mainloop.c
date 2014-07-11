@@ -250,7 +250,12 @@ int load_keyfile_to_options(GKeyFile *keyfile, const gchar *ini_group_name, chas
         gchar **arg_string_array;
         int i, j, array_size, count;
         gsize len;
-        gchar* reload_items[] = {"proxy-backend-addresses", "proxy-read-only-backend-addresses", "proxy-master-standby-address"};
+        gchar* reload_items[] = {"proxy-backend-addresses",
+                                 "proxy-read-only-backend-addresses",
+                                 "proxy-master-standby-address",
+                                 "client-ips",
+                                 "pwds"
+                                };
 
         g_mutex_lock(g->backends->backends_mutex);
         count = g->backends->backends->len;
@@ -268,22 +273,36 @@ int load_keyfile_to_options(GKeyFile *keyfile, const gchar *ini_group_name, chas
         }
 
         for (i = 0;i < array_size; i++) {
-                if (!g_key_file_has_key(keyfile, ini_group_name, reload_items[i], &gerr)) continue;
+                if (!g_key_file_has_key(keyfile, ini_group_name, reload_items[i], &gerr)) {
+                        if (i == 3) {/*client-ips*/
+                                chassis_plugin* p = chas->modules->pdata[1];
+                                p->insert_clientips(NULL, p->config);
+                        }
+                        continue;
+                }
                 arg_string_array = g_key_file_get_string_list(keyfile, ini_group_name, reload_items[i], &len, &gerr);
                 if (!gerr) {
-                        for (j = 0; arg_string_array[j]; j++) {
-                                arg_string_array[j] = g_strstrip(arg_string_array[j]);
-                                switch (i) {
-                                        case 0:
-                                                network_backends_add_unlock(g->backends, arg_string_array[j], BACKEND_TYPE_RW);
-                                                break;
-                                        case 1:
-                                                network_backends_add_unlock(g->backends, arg_string_array[j], BACKEND_TYPE_RO);
-                                                break;
-                                        case 2:
-                                                network_backends_add_unlock(g->backends, arg_string_array[j], BACKEND_TYPE_SY);
-                                                break;
+                        if (i < 3) {
+                                for (j = 0; arg_string_array[j]; j++) {
+                                        arg_string_array[j] = g_strstrip(arg_string_array[j]);
+                                        switch (i) {
+                                                case 0:
+                                                        network_backends_add_unlock(g->backends, arg_string_array[j], BACKEND_TYPE_RW);
+                                                        break;
+                                                case 1:
+                                                        network_backends_add_unlock(g->backends, arg_string_array[j], BACKEND_TYPE_RO);
+                                                        break;
+                                                case 2:
+                                                        network_backends_add_unlock(g->backends, arg_string_array[j], BACKEND_TYPE_SY);
+                                                        break;
+                                        }
                                 }
+                        }else if(i == 3) {
+                                chassis_plugin* p = chas->modules->pdata[1];
+                                p->insert_clientips(arg_string_array, p->config);
+                        }else if(i == 4) {
+                                chassis_plugin* p = chas->modules->pdata[1];
+                                p->insert_pwds(arg_string_array, p->config);
                         }
                         g_strfreev(arg_string_array);
                 } else {
@@ -298,6 +317,7 @@ int load_keyfile_to_options(GKeyFile *keyfile, const gchar *ini_group_name, chas
                 network_backend_t* b = g_ptr_array_index(g->backends->backends, i);
                 b->state = BACKEND_STATE_UP;
         }
+        g->backends->global_wrr->max_weight = 0; //Reinitialize all backend weight
         g_mutex_unlock(g->backends->backends_mutex);
         return 0;
 }
@@ -318,7 +338,7 @@ void reload_config_handler(int G_GNUC_UNUSED fd, short G_GNUC_UNUSED event_type,
                 g_key_file_free(keyfile);
                 return;
         }   
-        chassis_plugin *p = chas->modules->pdata[1];/*proxy-plugin*/
+        //chassis_plugin *p = chas->modules->pdata[1];/*proxy-plugin*/
         if (-1 == load_keyfile_to_options(keyfile, "mysql-proxy", chas)){
                 g_message("%s:load_keyfile_to_options error", G_STRLOC);
                 g_key_file_free(keyfile);

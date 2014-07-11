@@ -536,56 +536,54 @@ int idle_ro(network_mysqld_con* con) {
 }
 
 int wrr_ro(network_mysqld_con *con) {
-	guint i;
+        guint i;
 
-	network_backends_t* backends = con->srv->priv->backends;
-	g_wrr_poll* rwsplit = backends->global_wrr;
-	guint ndx_num = network_backends_count(backends);
+        network_backends_t* backends = con->srv->priv->backends;
+        g_wrr_poll* rwsplit = backends->global_wrr;
+        guint ndx_num = network_backends_count(backends);
         if (rwsplit->next_ndx >= ndx_num)
                 rwsplit->next_ndx = 0;
-	// set max weight if no init
-	if (rwsplit->max_weight == 0) {
-		for(i = 0; i < ndx_num; ++i) {
-			network_backend_t* backend = network_backends_get(backends, i);
-			if (backend == NULL) continue;
-			if (rwsplit->max_weight < backend->weight) {
-				rwsplit->max_weight = backend->weight;
-				rwsplit->cur_weight = backend->weight;
-			}
-		}
-	}
+        // set max weight if no init
+        if (rwsplit->max_weight == 0) {
+                for(i = 0; i < ndx_num; ++i) {
+                        network_backend_t* backend = network_backends_get(backends, i);
+                        if (backend == NULL || backend->state == BACKEND_STATE_DOWN) continue;
+                        if (rwsplit->max_weight < backend->weight) {
+                                rwsplit->max_weight = backend->weight;
+                                rwsplit->cur_weight = backend->weight;
+                        }
+                }
+        }
 
-	guint max_weight = rwsplit->max_weight;
-	guint cur_weight = rwsplit->cur_weight;
-	guint next_ndx   = rwsplit->next_ndx;
+        guint max_weight = rwsplit->max_weight;
+        guint cur_weight = rwsplit->cur_weight;
+        guint next_ndx   = rwsplit->next_ndx;
 
-	// get backend index by slave wrr
-	gint ndx = -1;
-	for(i = 0; i < ndx_num; ++i) {
-		network_backend_t* backend = network_backends_get(backends, next_ndx);
-		if (backend == NULL) goto next;
+        // get backend index by slave wrr
+        gint ndx = -1;
+        for(i = 0; i < ndx_num; ++i) {
+                network_backend_t* backend = network_backends_get(backends, next_ndx);
+                if (backend == NULL) goto next;
 
-		network_connection_pool* pool = chassis_event_thread_pool(backend);
-		if (pool == NULL) goto next;
+                network_connection_pool* pool = chassis_event_thread_pool(backend);
+                if (pool == NULL) goto next;
 
-		if (backend->type == BACKEND_TYPE_RO && backend->weight >= cur_weight && backend->state == BACKEND_STATE_UP) ndx = next_ndx;
+                if (backend->type == BACKEND_TYPE_RO && backend->weight >= cur_weight && backend->state == BACKEND_STATE_UP) ndx = next_ndx;
+next:
+                if (next_ndx >= ndx_num - 1) {
+                        --cur_weight;
+                        next_ndx = 0;
 
-	next:
-		if (next_ndx >= ndx_num - 1) {
-			--cur_weight;
-			next_ndx = 0;
+                        if (cur_weight == 0) cur_weight = max_weight;
+                } else {
+                        ++next_ndx;
+                }   
 
-			if (cur_weight == 0) cur_weight = max_weight;
-		} else {
-			++next_ndx;
-		}   
-
-		if (ndx != -1) break;
-	}
-
-	rwsplit->cur_weight = cur_weight;
-	rwsplit->next_ndx = next_ndx;
-	return ndx;
+                if (ndx != -1) break;
+        }
+        rwsplit->cur_weight = cur_weight;
+        rwsplit->next_ndx = next_ndx;
+        return ndx;
 }
 
 /**
@@ -906,8 +904,8 @@ NETWORK_MYSQLD_PLUGIN_PROTO(proxy_read_auth) {
 //	g_string_assign_len(con->client->default_db, S(auth->database));
 
 	con->state = CON_STATE_SEND_AUTH_RESULT;
-
-	GString *hashed_password = g_hash_table_lookup(con->config->pwd_table, auth->username->str);
+        GString *hashed_password = NULL;
+        hashed_password = g_hash_table_lookup(con->config->pwd_table[config->pwdtable_index], auth->username->str);
 	if (hashed_password) {
 		GString *expected_response = g_string_sized_new(20);
 		network_mysqld_proto_password_scramble(expected_response, S(con->challenge), S(hashed_password));
@@ -1075,8 +1073,8 @@ void modify_user(network_mysqld_con* con) {
 
 		g_string_append_c(com_change_user, COM_CHANGE_USER);
 		g_string_append_len(com_change_user, client_user->str, client_user->len + 1);
-
-		GString* hashed_password = g_hash_table_lookup(con->config->pwd_table, client_user->str);
+                GString *hashed_password = NULL;
+                hashed_password = g_hash_table_lookup(con->config->pwd_table[con->config->pwdtable_index], client_user->str);
 		if (!hashed_password) return;
 
 		GString* expected_response = g_string_sized_new(20);
@@ -2138,12 +2136,11 @@ NETWORK_MYSQLD_PLUGIN_PROTO(proxy_connect_server) {
 	if (!online && g_hash_table_contains(config->lvs_table, &client_ip)) {
 		network_mysqld_con_send_error_full(con->client, C("Proxy Warning - Offline Now"), ER_UNKNOWN_ERROR, "07000");
 		return NETWORK_SOCKET_SUCCESS;
-	} else if (config->client_ips != NULL) {
-		for (i = 0; i < 3; ++i) {
-			if (g_hash_table_contains(config->ip_table, &client_ip)) break;
-			client_ip <<= 8;
-		}
-
+	} else if (g_hash_table_size(config->ip_table[config->iptable_index]) != 0) {
+                for (i = 0; i < 3; ++i) {
+                        if (g_hash_table_contains(config->ip_table[config->iptable_index], &client_ip)) break;
+                        client_ip <<= 8;
+                }
 		if (i == 3 && !g_hash_table_contains(config->lvs_table, &(con->client->src->addr.ipv4.sin_addr.s_addr))) {
 			network_mysqld_con_send_error_full(con->client, C("Proxy Warning - IP Forbidden"), ER_UNKNOWN_ERROR, "07000");
 			return NETWORK_SOCKET_SUCCESS;
@@ -2398,13 +2395,17 @@ chassis_plugin_config * network_mysqld_proxy_plugin_new(void) {
 	config->start_proxy     = 1;
 	config->pool_change_user = 1; /* issue a COM_CHANGE_USER to cleanup the connection 
 					 when we get back the connection from the pool */
-	config->ip_table = g_hash_table_new_full(g_int_hash, g_int_equal, g_free, NULL);
+	config->ip_table[0] = g_hash_table_new_full(g_int_hash, g_int_equal, g_free, NULL);
+	config->ip_table[1]= g_hash_table_new_full(g_int_hash, g_int_equal, g_free, NULL);
 	config->lvs_table = g_hash_table_new_full(g_int_hash, g_int_equal, g_free, NULL);
 	config->dt_table = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, g_free);
-	config->pwd_table = g_hash_table_new(g_str_hash, g_str_equal);
+	config->pwd_table[0] = g_hash_table_new(g_str_hash, g_str_equal);
+	config->pwd_table[1] = g_hash_table_new(g_str_hash, g_str_equal);
 	config->sql_log = NULL;
 	config->sql_log_type = NULL;
 	config->charset = NULL;
+        config->iptable_index = 0;
+        config->pwdtable_index = 0;
 
 	//g_mutex_init(&mutex);
 
@@ -2450,10 +2451,12 @@ void network_mysqld_proxy_plugin_free(chassis_plugin_config *config) {
 		g_free(config->client_ips);
 	}
 
-	g_hash_table_remove_all(config->ip_table);
-	g_hash_table_destroy(config->ip_table);
-
-	if (config->lvs_ips) {
+	g_hash_table_remove_all(config->ip_table[0]);
+	g_hash_table_destroy(config->ip_table[0]);
+	g_hash_table_remove_all(config->ip_table[1]);
+	g_hash_table_destroy(config->ip_table[1]);
+	
+        if (config->lvs_ips) {
 		for (i = 0; config->lvs_ips[i]; i++) {
 			g_free(config->lvs_ips[i]);
 		}
@@ -2473,8 +2476,10 @@ void network_mysqld_proxy_plugin_free(chassis_plugin_config *config) {
 	g_hash_table_remove_all(config->dt_table);
 	g_hash_table_destroy(config->dt_table);
 
-	g_hash_table_remove_all(config->pwd_table);
-	g_hash_table_destroy(config->pwd_table);
+	g_hash_table_remove_all(config->pwd_table[0]);
+	g_hash_table_destroy(config->pwd_table[0]);
+	g_hash_table_remove_all(config->pwd_table[1]);
+	g_hash_table_destroy(config->pwd_table[1]);
 
 	if (config->sql_log) fclose(config->sql_log);
 	if (config->sql_log_type) g_free(config->sql_log_type);
@@ -2628,6 +2633,77 @@ void* check_state(network_backends_t* bs) {
 	}
 }
 
+void proxy_plugin_insert_clientips(gchar** arg_string_array, chassis_plugin_config *config) {
+        int j;
+        char* token;
+        guint* sum = NULL;
+        
+        if (config->iptable_index == 0) {
+                g_hash_table_remove_all(config->ip_table[1]);
+        }else if (config->iptable_index == 1) {
+                g_hash_table_remove_all(config->ip_table[0]);
+        }
+        for (j = 0; arg_string_array && arg_string_array[j]; j++) {
+                arg_string_array[j] = g_strstrip(arg_string_array[j]);
+                sum = g_new0(guint, 1); 
+                while ((token = strsep(&arg_string_array[j], ".")) != NULL) {
+                        *sum = (*sum << 8) + atoi(token);
+                }   
+                *sum = htonl(*sum);
+                if (config->iptable_index == 0) {
+                        g_hash_table_add(config->ip_table[1], sum);
+                }else if (config->iptable_index == 1) {
+                        g_hash_table_add(config->ip_table[0], sum);
+                } 
+        }
+        if (config->iptable_index == 0) 
+                g_atomic_int_inc(&(config->iptable_index));
+        else if (config->iptable_index == 1) 
+                g_atomic_int_dec_and_test(&(config->iptable_index));
+}
+
+int proxy_plugin_insert_pwds(gchar** arg_string_array, chassis_plugin_config *config) {
+        char *user = NULL, *pwd = NULL;
+        gboolean is_complete = FALSE;
+        int j;
+
+        if (config->pwdtable_index == 0) {
+                g_hash_table_remove_all(config->pwd_table[1]);
+        }else if(config->pwdtable_index == 1) {
+                g_hash_table_remove_all(config->pwd_table[0]);
+        }
+        for (j = 0; arg_string_array && arg_string_array[j]; j++) {
+                if ((user = strsep(&arg_string_array[j], ":")) != NULL) {
+                        if ((pwd = strsep(&arg_string_array[j], ":")) != NULL) {
+                                is_complete = TRUE;
+                        }
+                }
+                if (is_complete) {
+                        char* raw_pwd = decrypt(pwd);
+                        if (raw_pwd) {
+                                GString* hashed_password = g_string_new(NULL);
+                                network_mysqld_proto_password_hash(hashed_password, raw_pwd, strlen(raw_pwd));
+                                if (config->pwdtable_index == 0)
+                                        g_hash_table_insert(config->pwd_table[1], user, hashed_password);
+                                else if(config->pwdtable_index == 1)
+                                        g_hash_table_insert(config->pwd_table[0], user, hashed_password)  ;
+                                g_free(raw_pwd);
+                        } else {
+                                g_critical("password decrypt failed");
+                                return -1;
+                        }
+                } else {
+                        g_critical("incorrect password settings");
+                        return -1;
+                }
+        }
+        if (config->pwdtable_index == 0) 
+                g_atomic_int_inc(&(config->pwdtable_index));
+        else if (config->pwdtable_index == 1) 
+                g_atomic_int_dec_and_test(&(config->pwdtable_index));
+        
+        return 0;
+}
 /**
  * init the plugin with the parsed config
  */
@@ -2701,7 +2777,7 @@ int network_mysqld_proxy_plugin_apply_config(chassis *chas, chassis_plugin_confi
 			*sum = (*sum << 8) + atoi(token);
 		}
 		*sum = htonl(*sum);
-		g_hash_table_add(config->ip_table, sum);
+		g_hash_table_add(config->ip_table[0], sum);
 	}
 
 	for (i = 0; config->lvs_ips && config->lvs_ips[i]; i++) {
@@ -2775,7 +2851,8 @@ int network_mysqld_proxy_plugin_apply_config(chassis *chas, chassis_plugin_confi
 				GString* hashed_password = g_string_new(NULL);
 				network_mysqld_proto_password_hash(hashed_password, raw_pwd, strlen(raw_pwd));
 
-				g_hash_table_insert(config->pwd_table, user, hashed_password);
+				g_hash_table_insert(config->pwd_table[0], user, hashed_password);
+                                g_free(raw_pwd);
 			} else {
 				g_critical("password decrypt failed");
 				return -1;
@@ -2811,7 +2888,8 @@ G_MODULE_EXPORT int plugin_init(chassis_plugin *p) {
 	p->get_options  = network_mysqld_proxy_plugin_get_options;
 	p->apply_config = network_mysqld_proxy_plugin_apply_config;
 	p->destroy      = network_mysqld_proxy_plugin_free;
-
+        p->insert_clientips = proxy_plugin_insert_clientips;
+        p->insert_pwds = proxy_plugin_insert_pwds;
 	return 0;
 }
 
