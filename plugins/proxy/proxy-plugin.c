@@ -2100,6 +2100,7 @@ NETWORK_MYSQLD_PLUGIN_PROTO(proxy_read_query_result) {
 					con->is_in_transaction = (inj->qstat.server_status & SERVER_STATUS_IN_TRANS);
 				} else {
 					if (strcasestr(str, "COMMIT") == str || strcasestr(str, "ROLLBACK") == str) con->is_in_transaction = FALSE;
+					if(inj->qstat.server_status & SERVER_STATUS_AUTOCOMMIT) con->is_in_transaction = FALSE;
 				}
 				if (g_hash_table_size(con->locks) > 0 && strcasestr(str, "SELECT RELEASE_LOCK") == str) {
 					gchar* b = strchr(str+strlen("SELECT RELEASE_LOCK"), '(') + 1;
