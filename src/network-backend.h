@@ -90,7 +90,7 @@ NETWORK_API int network_backends_remove(network_backends_t *backends, guint inde
 NETWORK_API int network_backends_check(network_backends_t *backends);
 NETWORK_API network_backend_t * network_backends_get(network_backends_t *backends, guint ndx);
 NETWORK_API guint network_backends_count(network_backends_t *backends);
-NETWORK_API network_backend_t* network_standby_backend_get(network_backends_t *bs);
+NETWORK_API network_backend_t* network_get_backend_by_type(network_backends_t *bs, backend_type_t type);
 NETWORK_API int network_backends_save_to_config(network_backends_t *bs, gchar* config_path);
 
 NETWORK_API g_wrr_poll *g_wrr_poll_new();

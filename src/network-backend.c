@@ -242,14 +242,14 @@ guint network_backends_count(network_backends_t *bs) {
 	return len;
 }
 
-network_backend_t* network_standby_backend_get(network_backends_t *bs) {
+network_backend_t* network_get_backend_by_type(network_backends_t *bs, backend_type_t type) {
         int i, len;
         network_backend_t *item = NULL;
         g_mutex_lock(bs->backends_mutex);
         len = bs->backends->len;
         for (i = 0; i < len; i++) {
                 item = bs->backends->pdata[i];
-                if (item->type == BACKEND_TYPE_SY) {
+                if (item->type == type) {
                         g_mutex_unlock(bs->backends_mutex);
                         return item;
                 }

@@ -1421,7 +1421,7 @@ int change_standby_to_master(network_mysqld_con *con) {
         int i;
         network_backend_t *standby, *item, *m_item, *s_item;
         network_backends_t *bs = con->srv->priv->backends;
-        standby = network_standby_backend_get(con->srv->priv->backends);
+        standby = network_get_backend_by_type(con->srv->priv->backends, BACKEND_TYPE_SY);
         if (standby != NULL && standby->state == BACKEND_STATE_UP) {
                 g_mutex_lock(bs->backends_mutex);
                 for (i = 0; i < bs->backends->len; i++) {
@@ -1575,11 +1575,10 @@ NETWORK_MYSQLD_PLUGIN_PROTO(proxy_read_query) {
 						send_sock = network_connection_pool_lua_swap(con, backend_ndx);
                                                 if (send_sock == NULL) {
                                                         network_backend_t *backend = network_backends_get(con->srv->priv->backends, backend_ndx);
-                                                        if (backend && backend->type == BACKEND_TYPE_RW) {
-                                                                if (errno == ECONNREFUSED) {
-                                                                        change_standby_to_master(con);
-                                                                }
-                                                        }
+							network_backend_t *master = network_get_backend_by_type(con->srv->priv->backends, BACKEND_TYPE_RW);
+							if ((backend && backend->type == BACKEND_TYPE_RW && errno == ECONNREFUSED) || (backend_ndx == -1 && master->state == BACKEND_STATE_DOWN)) {
+								change_standby_to_master(con);
+							}
                                                 }
                     } else if (type == COM_INIT_DB || type == COM_SET_OPTION || type == COM_FIELD_LIST) {
 						backend_ndx = wrr_ro(con);
