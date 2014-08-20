@@ -559,7 +559,7 @@ int wrr_ro(network_mysqld_con *con) {
         if (rwsplit->max_weight == 0) {
                 for(i = 0; i < ndx_num; ++i) {
                         network_backend_t* backend = network_backends_get(backends, i);
-                        if (backend == NULL || backend->state == BACKEND_STATE_DOWN) continue;
+                        if (backend == NULL || backend->state != BACKEND_STATE_UP) continue;
                         if (rwsplit->max_weight < backend->weight) {
                                 rwsplit->max_weight = backend->weight;
                                 rwsplit->cur_weight = backend->weight;
@@ -2481,9 +2481,12 @@ void network_mysqld_proxy_plugin_free(chassis_plugin_config *config) {
 		g_free(config->backend_addresses);
 	}
     
-        if (config->master_standby_addresses) {
-                g_strfreev(config->master_standby_addresses);
-        }
+       if (config->master_standby_addresses) {
+              g_strfreev(config->master_standby_addresses);
+       }
+       if (config->pwds) {
+              g_strfreev(config->pwds);
+       }
 	if (config->address) {
 		/* free the global scope */
 		network_mysqld_proxy_free(NULL);
@@ -2574,7 +2577,8 @@ static GOptionEntry * network_mysqld_proxy_plugin_get_options(chassis_plugin_con
 		{ "charset", 0, 0, G_OPTION_ARG_STRING, NULL, "original charset(default: LATIN1)", NULL },
 
 		{ "sql-log", 0, 0, G_OPTION_ARG_STRING, NULL, "sql log type(default: OFF)", NULL },
-
+              { "check_time", 0, 0, G_OPTION_ARG_INT, NULL, "the time interval of checking the backends", NULL},
+              { "connect_times", 0, 0, G_OPTION_ARG_INT, NULL, "the times of checking the backends", NULL},
 		{ NULL,                       0, 0, G_OPTION_ARG_NONE,   NULL, NULL, NULL }
 	};
 
@@ -2596,7 +2600,8 @@ static GOptionEntry * network_mysqld_proxy_plugin_get_options(chassis_plugin_con
 	config_entries[i++].arg_data = &(config->pwds);
 	config_entries[i++].arg_data = &(config->charset);
 	config_entries[i++].arg_data = &(config->sql_log_type);
-
+       config_entries[i++].arg_data = &(config->check_time);
+       config_entries[i++].arg_data = &(config->connect_times);
 	return config_entries;
 }
 
@@ -2653,32 +2658,64 @@ char* decrypt(char* in) {
 	return out;
 }
 
-void* check_state(network_backends_t* bs) {
+void* check_state(chassis *chas) {
 	MYSQL mysql;
-	mysql_init(&mysql);
-	guint i, tm = 1;
+       gint i, tm = 1;
+       char *user = NULL, *pwd_decr = NULL, *pwd_encr = NULL, *pwds_str = NULL;
+       mysql_init(&mysql);
+       chassis_plugin *p = chas->modules->pdata[1]; /*proxy plugin*/
+       chassis_plugin_config *config = p->config;
+       GPtrArray* backends = chas->priv->backends->backends;
+       if(config->pwds && config->pwds[0]) {
+              pwds_str = strdup(config->pwds[0]);
+              user = strsep(&pwds_str, ":");
+              pwd_encr = strsep(&pwds_str, ":");
+              pwd_decr = decrypt(pwd_encr);
+       }
 	sleep(1);
-
 	while (TRUE) {
-		GPtrArray* backends = bs->backends;
 		guint len = backends->len;
 
 		for (i = 0; i < len; ++i) {
-			network_backend_t* backend = g_ptr_array_index(backends, i);
-			if (backend == NULL || backend->state == BACKEND_STATE_UP || backend->state == BACKEND_STATE_OFFLINE) continue;
+                     network_backend_t* backend = g_ptr_array_index(backends, i);
+                     if (backend == NULL || backend->state == BACKEND_STATE_OFFLINE) continue;
+                     gchar* ip = inet_ntoa(backend->addr->addr.ipv4.sin_addr);
+                     guint port = ntohs(backend->addr->addr.ipv4.sin_port);
+                     mysql_options(&mysql, MYSQL_OPT_CONNECT_TIMEOUT, &tm);
+                     mysql_real_connect(&mysql, ip, user, pwd_decr, NULL, port, NULL, 0);
 
-			gchar* ip = inet_ntoa(backend->addr->addr.ipv4.sin_addr);
-			guint port = ntohs(backend->addr->addr.ipv4.sin_port);
-			mysql_options(&mysql, MYSQL_OPT_CONNECT_TIMEOUT, &tm);
-			mysql_real_connect(&mysql, ip, NULL, NULL, NULL, port, NULL, 0);
-
-			if (mysql_errno(&mysql) == 1045 || mysql_errno(&mysql) == 0) backend->state = BACKEND_STATE_UP;
-			else if (backend->state == BACKEND_STATE_UNKNOWN) backend->state = BACKEND_STATE_DOWN;
-
-			mysql_close(&mysql);
+                     if(backend->state == BACKEND_STATE_UP) {
+                            if(mysql_errno(&mysql) == 0) { 
+                                   backend->connect_times = 0;
+                            } else {
+                                   if(backend->connect_times < config->connect_times) {
+                                          ++(backend->connect_times);
+                                   } else { 
+                                          backend->state = BACKEND_STATE_DOWN;
+                                          backend->connect_times = 0;
+                                   }
+                            }
+                     } else if(backend->state == BACKEND_STATE_DOWN) {
+                            if(mysql_errno(&mysql) == 0) { 
+                                   if(backend->connect_times < config->connect_times) {
+                                          ++(backend->connect_times);
+                                   } else {
+                                          backend->state = BACKEND_STATE_UP;
+                                          backend->connect_times = 0;
+                                   }
+                            } else {
+                                          backend->connect_times = 0;
+                            }
+                     } else if(backend->state == BACKEND_STATE_UNKNOWN) {
+                            if(mysql_errno(&mysql) == 0) 
+                                   backend->state = BACKEND_STATE_UP;
+                            else
+                                   backend->state = BACKEND_STATE_DOWN;
+                     }
+                     mysql_close(&mysql);
 		}
 
-		sleep(4);
+		sleep(config->check_time);
 	}
 }
 
@@ -2886,10 +2923,10 @@ int network_mysqld_proxy_plugin_apply_config(chassis *chas, chassis_plugin_confi
 
 	for (i = 0; config->pwds && config->pwds[i]; i++) {
 		char *user = NULL, *pwd = NULL;
-		gboolean is_complete = FALSE;
-
-		if ((user = strsep(&config->pwds[i], ":")) != NULL) {
-			if ((pwd = strsep(&config->pwds[i], ":")) != NULL) {
+              gboolean is_complete = FALSE;
+              char *pwds_str = strdup(config->pwds[i]);
+		if ((user = strsep(&pwds_str, ":")) != NULL) {
+			if ((pwd = strsep(&pwds_str, ":")) != NULL) {
 				is_complete = TRUE;
 			}
 		}
@@ -2901,7 +2938,7 @@ int network_mysqld_proxy_plugin_apply_config(chassis *chas, chassis_plugin_confi
 				network_mysqld_proto_password_hash(hashed_password, raw_pwd, strlen(raw_pwd));
 
 				g_hash_table_insert(config->pwd_table[0], user, hashed_password);
-                                g_free(raw_pwd);
+                            g_free(raw_pwd);
 			} else {
 				g_critical("password decrypt failed");
 				return -1;
@@ -2923,7 +2960,7 @@ int network_mysqld_proxy_plugin_apply_config(chassis *chas, chassis_plugin_confi
 	event_base_set(chas->event_base, &(listen_sock->event));
 	event_add(&(listen_sock->event), NULL);
 
-	g_thread_create((GThreadFunc)check_state, g->backends, FALSE, NULL);
+	g_thread_create((GThreadFunc)check_state, chas, FALSE, NULL);
 
 	return 0;
 }
@@ -2937,8 +2974,8 @@ G_MODULE_EXPORT int plugin_init(chassis_plugin *p) {
 	p->get_options  = network_mysqld_proxy_plugin_get_options;
 	p->apply_config = network_mysqld_proxy_plugin_apply_config;
 	p->destroy      = network_mysqld_proxy_plugin_free;
-        p->insert_clientips = proxy_plugin_insert_clientips;
-        p->insert_pwds = proxy_plugin_insert_pwds;
+       p->insert_clientips = proxy_plugin_insert_clientips;
+       p->insert_pwds = proxy_plugin_insert_pwds;
 	return 0;
 }
 

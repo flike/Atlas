@@ -59,7 +59,7 @@ typedef struct {
 	gint connected_clients; /**< number of open connections to this backend for SQF */
 
 	GString *uuid;           /**< the UUID of the backend */
-
+       gint connect_times;
 	guint weight;
 } network_backend_t;
 

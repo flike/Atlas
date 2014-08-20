@@ -32,7 +32,7 @@ struct chassis_plugin_config {
 
 	gchar **backend_addresses;        /**< read-write backends */
 	gchar **read_only_backend_addresses; /**< read-only  backends */
-        gchar **master_standby_addresses; 
+       gchar **master_standby_addresses; 
 	gint fix_bug_25371;               /**< suppress the second ERR packet of bug #25371 */
 
 	gint profiling;                   /**< skips the execution of the read_query() function */
@@ -47,8 +47,8 @@ struct chassis_plugin_config {
 	gint start_proxy;
 
 	gchar **client_ips;
-        GHashTable *ip_table[2];
-        gint iptable_index;
+       GHashTable *ip_table[2];
+       gint iptable_index;
 
 	gchar **lvs_ips;
 	GHashTable *lvs_table;
@@ -58,7 +58,7 @@ struct chassis_plugin_config {
 
 	gchar **pwds;
 	GHashTable *pwd_table[2];
-        gint pwdtable_index;
+       gint pwdtable_index;
 
 	network_mysqld_con *listen_con;
 
@@ -66,6 +66,8 @@ struct chassis_plugin_config {
 	gchar *sql_log_type;
 
 	gchar *charset;
+       gint check_time;
+       gint connect_times;
 };
 
 NETWORK_API int network_connection_pool_getmetatable(lua_State *L);
