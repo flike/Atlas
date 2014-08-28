@@ -75,8 +75,8 @@ network_backends_t *network_backends_new(guint event_thread_count, gchar* config
 	bs->backends_mutex = g_mutex_new();	/*remove lock*/
 	bs->global_wrr = g_wrr_poll_new();
 	bs->event_thread_count = event_thread_count;
-        bs->config_path = g_strdup(config_path);
-        bs->recycle_backends = g_ptr_array_new();
+       bs->config_path = g_strdup(config_path);
+       bs->recycle_backends = g_ptr_array_new();
 
 	return bs;
 }
@@ -119,8 +119,8 @@ void network_backends_free(network_backends_t *bs) {
 	
         g_mutex_free(bs->backends_mutex);	/*remove lock*/
         g_free(bs->config_path);
-	g_wrr_poll_free(bs->global_wrr);
-	g_free(bs);
+        g_wrr_poll_free(bs->global_wrr);
+        g_free(bs);
 }
 
 int network_backends_remove(network_backends_t *bs, guint index) {

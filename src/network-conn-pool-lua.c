@@ -282,7 +282,7 @@ network_socket *self_connect(network_mysqld_con *con, network_backend_t *backend
  * @return NULL if swapping failed
  *         the new backend on success
  */
-network_socket *network_connection_pool_lua_swap(network_mysqld_con *con, int backend_ndx) {
+network_socket* network_connection_pool_lua_swap(network_mysqld_con *con, int backend_ndx) {
 	network_backend_t *backend = NULL;
 	network_socket *send_sock;
 	network_mysqld_con_lua_t *st = con->plugin_con_state;
@@ -331,4 +331,131 @@ network_socket *network_connection_pool_lua_swap(network_mysqld_con *con, int ba
 	st->backend_ndx = backend_ndx;
 
 	return send_sock;
+}
+
+int wrr_ro(network_mysqld_con *con) {
+       guint i;
+       network_backends_t* backends = con->srv->priv->backends;
+       g_wrr_poll* rwsplit = backends->global_wrr;
+       guint ndx_num = network_backends_count(backends);
+       if (rwsplit->next_ndx >= ndx_num)
+              rwsplit->next_ndx = 0; 
+       // set max weight if no init
+       if (rwsplit->max_weight == 0) { 
+              for(i = 0; i < ndx_num; ++i) {
+                     network_backend_t* backend = network_backends_get(backends, i);
+                     if (backend == NULL || backend->state != BACKEND_STATE_UP) continue;
+                     if (rwsplit->max_weight < backend->weight) {
+                            rwsplit->max_weight = backend->weight;
+                            rwsplit->cur_weight = backend->weight;
+                     }    
+              }    
+       }    
+
+       guint max_weight = rwsplit->max_weight;
+       guint cur_weight = rwsplit->cur_weight;
+       guint next_ndx   = rwsplit->next_ndx;
+
+       // get backend index by slave wrr
+       gint ndx = -1;
+       for(i = 0; i < ndx_num; ++i) {
+              network_backend_t* backend = network_backends_get(backends, next_ndx);
+              if (backend == NULL) goto next;
+
+              network_connection_pool* pool = chassis_event_thread_pool(backend);
+              if (pool == NULL) goto next;
+
+              if (backend->type == BACKEND_TYPE_RO && backend->weight >= cur_weight && backend->state == BACKEND_STATE_UP) ndx = next_ndx;
+next:
+              if (next_ndx >= ndx_num - 1) { 
+                     --cur_weight;
+                     next_ndx = 0; 
+
+                     if (cur_weight == 0) cur_weight = max_weight;
+              } else {
+                     ++next_ndx;
+              }    
+
+              if (ndx != -1) break;
+       }    
+       rwsplit->cur_weight = cur_weight;
+       rwsplit->next_ndx = next_ndx;
+       return ndx; 
+}
+
+int idle_rw(network_mysqld_con* con) {
+       int ret = -1;
+       guint i;
+
+       network_backends_t* backends = con->srv->priv->backends;
+
+       guint count = network_backends_count(backends);
+       for (i = 0; i < count; ++i) {
+              network_backend_t* backend = network_backends_get(backends, i);
+              if (backend == NULL) continue;
+
+              network_connection_pool* pool = chassis_event_thread_pool(backend);
+              if (pool == NULL) continue;
+
+              if (backend->type == BACKEND_TYPE_RW && backend->state == BACKEND_STATE_UP) {
+                     ret = i;
+                     break;
+              }
+       }
+
+       return ret;
+}
+
+int idle_ro(network_mysqld_con* con) {
+       int max_conns = -1;
+       guint i;
+
+       network_backends_t* backends = con->srv->priv->backends;
+
+       guint count = network_backends_count(backends);
+       for(i = 0; i < count; ++i) {
+              network_backend_t* backend = network_backends_get(backends, i);
+              if (backend == NULL) continue;
+
+              network_connection_pool* pool = chassis_event_thread_pool(backend);
+              if (pool == NULL) continue;
+
+              if (backend->type == BACKEND_TYPE_RO && backend->state == BACKEND_STATE_UP) {
+                     if (max_conns == -1 || backend->connected_clients < max_conns) {
+                            max_conns = backend->connected_clients;
+                     }    
+              }    
+       }    
+
+       return max_conns;
+}
+
+int change_standby_to_master(network_mysqld_con *con) {
+       int i;
+       network_backend_t *standby, *item, *m_item, *s_item, *temp_backend;
+       network_backends_t *bs = con->srv->priv->backends;
+       standby = network_get_backend_by_type(con->srv->priv->backends, BACKEND_TYPE_SY);
+       if (standby != NULL && standby->state == BACKEND_STATE_UP) {
+              g_mutex_lock(bs->backends_mutex);
+              for (i = 0; i < bs->backends->len; i++) {
+                     item = g_ptr_array_index(bs->backends, i);
+                     if (item->type == BACKEND_TYPE_RW) {
+                            item->type = BACKEND_TYPE_SY;
+                            item->state = BACKEND_STATE_DOWN;
+                            m_item = item;
+                     } else if (item->type == BACKEND_TYPE_SY) {
+                            item->type = BACKEND_TYPE_RW;
+                            s_item = item;
+                            temp_backend = g_ptr_array_index(bs->backends, 0);
+                            bs->backends->pdata[0] = item;
+                            bs->backends->pdata[i] = temp_backend;
+                     }
+              }
+              g_mutex_unlock(bs->backends_mutex);
+              g_message("%s:master(%s) is down, change standby(%s) to master.", G_STRLOC, m_item->addr->name->str, s_item->addr->name->str);
+       }else {
+              g_message("%s:have no standby master or standby master down,can't change master to standby",G_STRLOC);
+              return -1;
+       }
+       return 0;
 }

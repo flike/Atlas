@@ -73,6 +73,7 @@
 #include "lua-scope.h"
 #include "glib-ext.h"
 #include "network-mysqld-lua.h"
+#include "network-conn-pool-lua.h"
 
 #if defined(HAVE_SYS_SDT_H) && defined(ENABLE_DTRACE)
 #include <sys/sdt.h>
@@ -216,6 +217,7 @@ network_mysqld_con *network_mysqld_con_new() {
 	con->challenge = g_string_sized_new(20);
     	con->stmt_hash_table = g_hash_table_new_full(g_int_hash,g_int_equal,NULL,(GDestroyNotify)network_mysqld_stmt_params_free);
     	con->global_stmt_id = 1;
+       con->backend_ndx = -1;
 	return con;
 }
 
@@ -891,6 +893,46 @@ const char *network_mysqld_con_state_get_name(network_mysqld_con_state_t state) 
 	return "unknown";
 }
 
+int reroute_failed_sql(network_mysqld_con *con) {
+       int ndx;
+       network_backend_t *backend;
+       network_socket *send_sock = NULL;
+
+       network_mysqld_con_lua_t *st = con->plugin_con_state;
+       network_backends_t* bs = con->srv->priv->backends;
+       injection *inj = g_queue_peek_head(st->injected.queries);
+       backend = network_backends_get(bs, con->backend_ndx);
+       backend->state = BACKEND_STATE_DOWN;
+       
+       if(con->backend_ndx > 0) {
+              ndx = wrr_ro(con);
+              send_sock = network_connection_pool_lua_swap(con, ndx);
+       }
+       if(send_sock == NULL && con->backend_ndx > 0) {
+              ndx = idle_rw(con);
+              send_sock = network_connection_pool_lua_swap(con, ndx);
+       }
+       if(send_sock == NULL) {
+              if(-1 != change_standby_to_master(con)) {
+                     ndx = idle_rw(con);
+                     send_sock = network_connection_pool_lua_swap(con, ndx);
+              }
+       }
+       network_socket_free(con->server);
+       if(send_sock != NULL) {
+              con->backend_ndx = ndx;
+              con->resultset_is_needed = inj->resultset_is_needed;
+              network_mysqld_queue_reset(send_sock);
+              network_mysqld_queue_append(send_sock, send_sock->send_queue, S(inj->query));
+              con->server = send_sock;
+              return 0;
+       } else {
+              con->server = NULL;
+              con->backend_ndx = -1;
+              return -1;
+       }
+}
+
 /**
  * handle the different states of the MySQL protocol
  *
@@ -1473,7 +1515,7 @@ void network_mysqld_con_handle(int event_fd, short events, void *user_data) {
 			 *
 			 * this state will loop until all the packets from the send-queue are flushed 
 			 */
-
+retry:
 			if (con->server->send_queue->offset == 0) {
 				/* only parse the packets once */
 				network_packet packet;
@@ -1488,9 +1530,8 @@ void network_mysqld_con_handle(int event_fd, short events, void *user_data) {
 
 					break;
 				}
-			}
-	
-			switch (network_mysqld_write(srv, con->server)) {
+                     }
+                     switch (network_mysqld_write(srv, con->server)) {
 			case NETWORK_SOCKET_SUCCESS:
 				break;
 			case NETWORK_SOCKET_WAIT_FOR_EVENT:
@@ -1499,14 +1540,18 @@ void network_mysqld_con_handle(int event_fd, short events, void *user_data) {
 				return;
 			case NETWORK_SOCKET_ERROR_RETRY:
 			case NETWORK_SOCKET_ERROR:
-				g_debug("%s.%d: network_mysqld_write(CON_STATE_SEND_QUERY) returned an error", __FILE__, __LINE__);
-
-				/**
-				 * write() failed, close the connections 
-				 */
-				con->state = CON_STATE_ERROR;
-				break;
-			}
+                            g_message("%s: network_mysqld_write(CON_STATE_SEND_QUERY) returned an error, and try to reroute the sql", G_STRLOC);
+                            network_mysqld_con_lua_t *st = con->plugin_con_state;
+                            injection *inj = g_queue_peek_head(st->injected.queries);
+                            gboolean have_last_insert_id = inj->qstat.insert_id > 0;
+                            if(!con->is_in_transaction && !con->is_not_autocommit && !con->is_in_select_calc_found_rows && !have_last_insert_id && g_hash_table_size(con->locks) == 0 && (-1 != reroute_failed_sql(con))) {
+                                   goto retry;
+                            } else {
+                                   con->state = CON_STATE_ERROR;
+                                   g_message("%s: network_mysqld_write(CON_STATE_SEND_QUERY) returned an error, and reroute the sql failed", G_STRLOC);
+                                   break;
+                            }
+                     }
 			
 			if (con->state != ostate) break; /* the state has changed (e.g. CON_STATE_ERROR) */
 
