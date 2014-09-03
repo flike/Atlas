@@ -80,7 +80,7 @@ function read_query(packet)
 				"unknown",
 				"rw",
 				"ro",
-                                "sy"
+                            "sy"
 			}
 			local b = proxy.global.backends[i]
 
@@ -171,6 +171,14 @@ function read_query(packet)
 			{ name = "status", 
 			  type = proxy.MYSQL_TYPE_STRING },
 		}
+       elseif string.find(query:lower(), "^change%s+master+$") then
+              if proxy.global.config.rwsplit then proxy.global.config.rwsplit.max_weight = -1 end 
+              local newserver = string.match(query:lower(), "^change%s+master+$");
+              proxy.global.backends.changemaster = newserver
+              fields = { 
+                     { name = "status",
+                     type = proxy.MYSQL_TYPE_STRING },
+              }  
         elseif string.find(query:lower(), "^add%s+standby%s+.+$") then
                 local newserver = string.match(query:lower(), "^add%s+standby%s+(.+)$")
                 proxy.global.backends.addstandby = newserver
@@ -223,10 +231,11 @@ function read_query(packet)
 		rows[#rows + 1] = { "SET OFFLINE $backend_id", "offline backend server, $backend_id is backend_ndx's id" }
 		rows[#rows + 1] = { "SET ONLINE $backend_id", "online backend server, ..." }
 		rows[#rows + 1] = { "ADD MASTER $backend", "example: \"add master 127.0.0.1:3306\", ..." }
-                rows[#rows + 1] = { "ADD SLAVE $backend", "example: \"add slave 127.0.0.1:3306\", ..." }
-                rows[#rows + 1] = { "ADD STANDBY $backend", "example: \"add standby 127.0.0.1:3306\", ..." }
-                rows[#rows + 1] = { "REMOVE BACKEND $backend_id", "example: \"remove backend 1\", ..." }
-                rows[#rows + 1] = { "SAVE CONFIG", "save the backends to config file" }
+		rows[#rows + 1] = { "CHANGE MASTER", "change standby to master" }
+              rows[#rows + 1] = { "ADD SLAVE $backend", "example: \"add slave 127.0.0.1:3306\", ..." }
+              rows[#rows + 1] = { "ADD STANDBY $backend", "example: \"add standby 127.0.0.1:3306\", ..." }
+              rows[#rows + 1] = { "REMOVE BACKEND $backend_id", "example: \"remove backend 1\", ..." }
+              rows[#rows + 1] = { "SAVE CONFIG", "save the backends to config file" }
 	else
 		set_error("use 'SELECT * FROM help' to see the supported commands")
 		return proxy.PROXY_SEND_RESULT

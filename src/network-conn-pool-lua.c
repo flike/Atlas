@@ -430,11 +430,10 @@ int idle_ro(network_mysqld_con* con) {
        return max_conns;
 }
 
-int change_standby_to_master(network_mysqld_con *con) {
+int change_standby_to_master(network_backends_t *bs) {
        int i;
        network_backend_t *standby, *item, *m_item, *s_item, *temp_backend;
-       network_backends_t *bs = con->srv->priv->backends;
-       standby = network_get_backend_by_type(con->srv->priv->backends, BACKEND_TYPE_SY);
+       standby = network_get_backend_by_type(bs, BACKEND_TYPE_SY);
        if (standby != NULL && standby->state == BACKEND_STATE_UP) {
               g_mutex_lock(bs->backends_mutex);
               for (i = 0; i < bs->backends->len; i++) {

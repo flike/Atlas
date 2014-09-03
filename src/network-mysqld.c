@@ -913,7 +913,7 @@ int reroute_failed_sql(network_mysqld_con *con) {
               send_sock = network_connection_pool_lua_swap(con, ndx);
        }
        if(send_sock == NULL) {
-              if(-1 != change_standby_to_master(con)) {
+              if(-1 != change_standby_to_master(con->srv->priv->backends)) {
                      ndx = idle_rw(con);
                      send_sock = network_connection_pool_lua_swap(con, ndx);
               }

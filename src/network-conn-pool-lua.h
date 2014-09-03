@@ -76,7 +76,7 @@ NETWORK_API int network_connection_pool_lua_add_connection(network_mysqld_con *c
 NETWORK_API int wrr_ro(network_mysqld_con *con);
 NETWORK_API int idle_rw(network_mysqld_con* con);
 NETWORK_API int idle_ro(network_mysqld_con* con);
-NETWORK_API int change_standby_to_master(network_mysqld_con *con);
+NETWORK_API int change_standby_to_master(network_backends_t *bs);
 NETWORK_API network_socket *network_connection_pool_lua_swap(network_mysqld_con *con, int backend_ndx);
 
 #endif

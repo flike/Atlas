@@ -1446,7 +1446,7 @@ NETWORK_MYSQLD_PLUGIN_PROTO(proxy_read_query) {
                                                  network_backend_t *backend = network_backends_get(con->srv->priv->backends, backend_ndx);
                                                  network_backend_t *master = network_get_backend_by_type(con->srv->priv->backends, BACKEND_TYPE_RW);
                                                  if ((backend && backend->type == BACKEND_TYPE_RW && errno == ECONNREFUSED) || (backend_ndx == -1 && master->state == BACKEND_STATE_DOWN)) {
-                                                        change_standby_to_master(con);
+                                                        change_standby_to_master(con->srv->priv->backends);
                                                  }
                                           }
                                    } else if (type == COM_INIT_DB || type == COM_SET_OPTION || type == COM_FIELD_LIST) {
