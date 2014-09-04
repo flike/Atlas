@@ -2324,8 +2324,10 @@ chassis_plugin_config * network_mysqld_proxy_plugin_new(void) {
 	config->sql_log = NULL;
 	config->sql_log_type = NULL;
 	config->charset = NULL;
-        config->iptable_index = 0;
-        config->pwdtable_index = 0;
+       config->iptable_index = 0;
+       config->pwdtable_index = 0;
+       config->connect_times = 1;
+       config->check_time = 4;
 
 	//g_mutex_init(&mutex);
 
