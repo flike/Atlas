@@ -39,6 +39,7 @@ int chassis_keyfile_to_options(GKeyFile *keyfile, const gchar *ini_group_name, G
 		gchar **arg_string_array;
 		gboolean arg_bool = 0;
 		gint arg_int = 0;
+              gint64 arg_int64 = 0;
 		gdouble arg_double = 0;
 		gsize len = 0;
 
@@ -79,6 +80,12 @@ int chassis_keyfile_to_options(GKeyFile *keyfile, const gchar *ini_group_name, G
 				*(gint *)(entry->arg_data) = arg_int;
 			}
 			break;
+              case G_OPTION_ARG_INT64: 
+                     arg_int64 = g_key_file_get_int64(keyfile, ini_group_name, entry->long_name, &gerr);
+                     if (!gerr) { 
+                            *(gint64 *)(entry->arg_data) = arg_int64;
+                     } 
+                     break;
 #if GLIB_MAJOR_VERSION >= 2 && GLIB_MINOR_VERSION >= 12 
 		case G_OPTION_ARG_DOUBLE: 
 			arg_double = g_key_file_get_double(keyfile, ini_group_name, entry->long_name, &gerr);

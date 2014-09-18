@@ -55,6 +55,7 @@ struct chassis_plugin_config {
 
 	gchar **tables;
 	GHashTable *dt_table;
+       GHashTable *rule_table;
 
 	gchar **pwds;
 	GHashTable *pwd_table[2];

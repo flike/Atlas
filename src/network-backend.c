@@ -258,6 +258,26 @@ network_backend_t* network_get_backend_by_type(network_backends_t *bs, backend_t
         return NULL;
 }
 
+network_backend_t* network_get_backend_by_addr(network_backends_t *bs, char* addr) {
+       int i, len;
+       char **gname;
+       network_backend_t *item = NULL;
+       g_mutex_lock(bs->backends_mutex);
+       len = bs->backends->len;
+       for (i = 0; i < len; i++) {
+              item = bs->backends->pdata[i];
+              gname = g_strsplit(item->addr->name->str, ":", 2); 
+              if (strcmp(gname[0], addr) == 0) {
+                     g_mutex_unlock(bs->backends_mutex);
+                     g_strfreev(gname);
+                     return item;
+              }   
+              g_strfreev(gname);
+       }   
+       g_mutex_unlock(bs->backends_mutex);
+       return NULL;
+}
+
 int network_backends_save_to_config(network_backends_t *bs, gchar* config_path) {
         int i, len, file_size = 0, first_append_master = 1, first_append_slave = 1, first_append_standby = 1;
         GKeyFile* keyfile;

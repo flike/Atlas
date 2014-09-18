@@ -347,7 +347,7 @@ void reload_config_handler(int G_GNUC_UNUSED fd, short G_GNUC_UNUSED event_type,
         g_key_file_free(keyfile);
 }
 
-int chassis_mainloop(void *_chas) {
+int chassis_mainloop(void *_chas, GKeyFile *keyfile) {
 	chassis *chas = _chas;
 	guint i;
 	struct event ev_sigterm, ev_sigint, ev_sigsys;
@@ -380,6 +380,8 @@ int chassis_mainloop(void *_chas) {
 					G_STRLOC, p->name);
 			return -1;
 		}
+              if (i == 1)
+                     p->get_shard_rules(keyfile, chas, p->config);
 	}
 
 	/*

@@ -154,6 +154,7 @@ libmysql_proxy_la_SOURCES = \
 	network-injection-lua.c \
 	network-backend.c \
 	network-backend-lua.c \
+	chassis-shard.c \
 	lua-env.c
 
 libmysql_proxy_la_LDFLAGS  = -export-dynamic -no-undefined -dynamic
@@ -168,6 +169,7 @@ include_HEADERS=\
 	network-mysqld.h \
 	network-mysqld-lua.h \
 	network-mysqld-proto.h \
+	chassis-shard.h \
 	network-mysqld-binlog.h \
 	network-mysqld-packet.h \
 	network_mysqld_type.h \

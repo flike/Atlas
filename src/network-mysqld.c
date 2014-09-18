@@ -116,6 +116,7 @@
 #define C(x) x, sizeof(x) - 1
 #define S(x) x->str, x->len
 
+char* charset[64] = {NULL, "big5", NULL, NULL, NULL, NULL, NULL, NULL, "latin1", NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,NULL, NULL, NULL, NULL, NULL, NULL, NULL, "gb2312", NULL, NULL, NULL, "gbk", NULL, NULL, NULL, NULL, "utf8", NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, "binary"};
 //static GMutex con_mutex;
 
 /**
@@ -1939,7 +1940,8 @@ void network_mysqld_admin_con_accept(int G_GNUC_UNUSED event_fd, short events, v
 int network_mysqld_con_send_resultset(network_socket *con, GPtrArray *fields, GPtrArray *rows) {
 	GString *s;
 	gsize i, j;
-
+       gchar charset_buf[2];
+       gint charset_num = 8; /*latin1*/
 	g_assert(fields->len > 0);
 
 	s = g_string_new(NULL);
@@ -1964,6 +1966,15 @@ int network_mysqld_con_send_resultset(network_socket *con, GPtrArray *fields, GP
 	 *  \5\0\0\3 
 	 *    \376\0\0\2\0
      */
+       if (0 < con->charset_results->len) {
+              for (i = 0; i < 64; i++) {
+                     if (charset[i] && strcasecmp(con->charset_results->str, charset[i]) == 0) {
+                            charset_num = i;
+                            break;
+                     }
+              }
+       }
+       sprintf(charset_buf, "%02x", charset_num);
 	network_mysqld_proto_append_lenenc_int(s, fields->len);
 	network_mysqld_queue_append(con, con->send_queue, S(s));
 
@@ -1980,7 +1991,7 @@ int network_mysqld_con_send_resultset(network_socket *con, GPtrArray *fields, GP
 		network_mysqld_proto_append_lenenc_string(s, field->org_name ? field->org_name : "");    /* org_name */
 
 		g_string_append_c(s, '\x0c');                  /* length of the following block, 12 byte */
-		g_string_append_len(s, "\x08\x00", 2);         /* charset */
+		g_string_append_len(s, charset_buf, 2);         /* charset */
 		g_string_append_c(s, (field->length >> 0) & 0xff); /* len */
 		g_string_append_c(s, (field->length >> 8) & 0xff); /* len */
 		g_string_append_c(s, (field->length >> 16) & 0xff); /* len */

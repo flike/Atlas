@@ -155,6 +155,7 @@ typedef int socklen_t;
 
 #include "lib/sql-tokenizer.h"
 #include "chassis-event-thread.h"
+#include "chassis-shard.h"
 
 #define C(x) x, sizeof(x) - 1
 #define S(x) x->str, x->len
@@ -175,15 +176,6 @@ typedef int socklen_t;
 
 static gboolean online = TRUE;
 
-static gchar op = COM_QUERY;
-
-typedef struct {
-	gchar* table_name;
-	gchar* column_name;
-	guint table_num;
-} db_table_t;
-//GMutex mutex;
-
 typedef enum {
 	OFF,
 	ON,
@@ -192,313 +184,7 @@ typedef enum {
 
 SQL_LOG_TYPE sql_log_type = OFF;
 
-char* charset[64] = {NULL, "big5", NULL, NULL, NULL, NULL, NULL, NULL, "latin1", NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, "gb2312", NULL, NULL, NULL, "gbk", NULL, NULL, NULL, NULL, "utf8", NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, "binary"};
-
-guint get_table_index(GPtrArray* tokens, gint* d, gint* t) {
-	*d = *t = -1;
-
-	sql_token** ts = (sql_token**)(tokens->pdata);
-	guint len = tokens->len;
-
-	guint i = 1, j;
-	while (ts[i]->token_id == TK_COMMENT && ++i < len);
-	sql_token_id token_id = ts[i]->token_id;
-
-	if (token_id == TK_SQL_SELECT || token_id == TK_SQL_DELETE) {
-		for (; i < len; ++i) {
-			if (ts[i]->token_id == TK_SQL_FROM) {
-				for (j = i+1; j < len; ++j) {
-					if (ts[j]->token_id == TK_SQL_WHERE) break;
-
-					if (ts[j]->token_id == TK_LITERAL) {
-						if (j + 2 < len && ts[j+1]->token_id == TK_DOT) {
-							*d = j;
-							*t = j + 2;
-						} else {
-							*t = j;
-						}
-
-						break;
-					}
-				}
-
-				break;
-			}
-		}
-
-		return 1;
-	} else if (token_id == TK_SQL_UPDATE) {
-		for (; i < len; ++i) {
-			if (ts[i]->token_id == TK_SQL_SET) break;
-
-			if (ts[i]->token_id == TK_LITERAL) {
-				if (i + 2 < len && ts[i+1]->token_id == TK_DOT) {
-					*d = i;
-					*t = i + 2;
-				} else {
-					*t = i;
-				}
-
-				break;
-			}
-		}
-
-		return 2;
-	} else if (token_id == TK_SQL_INSERT || token_id == TK_SQL_REPLACE) {
-		for (; i < len; ++i) {
-			gchar* str = ts[i]->text->str;
-			if (strcasecmp(str, "VALUES") == 0 || strcasecmp(str, "VALUE") == 0) break;
-
-			sql_token_id token_id = ts[i]->token_id;
-			if (token_id == TK_LITERAL && i + 2 < len && ts[i+1]->token_id == TK_DOT) {
-				*d = i;
-				*t = i + 2;
-				break;
-			} else if (token_id == TK_LITERAL || token_id == TK_FUNCTION) {
-				if (i == len - 1) {
-					*t = i;
-					break;
-				} else {
-					str = ts[i+1]->text->str;
-					token_id = ts[i+1]->token_id;
-					if (strcasecmp(str, "VALUES") == 0 || strcasecmp(str, "VALUE") == 0 || token_id == TK_OBRACE || token_id == TK_SQL_SET) {
-						*t = i;
-						break;
-					}
-				}
-			}
-		}
-
-		return 3;
-	}
-
-	return 0;
-}
-
-GArray* get_column_index(GPtrArray* tokens, gchar* table_name, gchar* column_name, guint sql_type, gint start) {
-	GArray* columns = g_array_new(FALSE, FALSE, sizeof(guint));
-
-	sql_token** ts = (sql_token**)(tokens->pdata);
-	guint len = tokens->len;
-	guint i, j, k;
-	if (sql_type == 1) {
-		for (i = start; i < len; ++i) {
-			if (ts[i]->token_id == TK_SQL_WHERE) {
-				for (j = i+1; j < len-2; ++j) {
-					if (ts[j]->token_id == TK_LITERAL && strcasecmp(ts[j]->text->str, column_name) == 0) {
-						if (ts[j+1]->token_id == TK_EQ) {
-							if (ts[j-1]->token_id != TK_DOT || strcasecmp(ts[j-2]->text->str, table_name) == 0) {
-								k = j + 2;
-								g_array_append_val(columns, k);
-								break;
-							}
-						} else if (j + 3 < len && strcasecmp(ts[j+1]->text->str, "IN") == 0 && ts[j+2]->token_id == TK_OBRACE) {
-							k = j + 3;
-							g_array_append_val(columns, k);
-							while ((k += 2) < len && ts[k-1]->token_id != TK_CBRACE) {
-								g_array_append_val(columns, k);
-							}
-							break;
-						}
-					}
-				}
-				break;
-			}
-		}
-	} else if (sql_type == 2) {
-		for (i = start; i < len; ++i) {
-			if (ts[i]->token_id == TK_SQL_WHERE) {
-				for (j = i+1; j < len-2; ++j) {
-					if (ts[j]->token_id == TK_LITERAL && strcasecmp(ts[j]->text->str, column_name) == 0) {
-						if (ts[j+1]->token_id == TK_EQ) {
-							if (ts[j-1]->token_id != TK_DOT || strcmp(ts[j-2]->text->str, table_name) == 0) {
-								k = j + 2;
-								g_array_append_val(columns, k);
-								break;
-							}
-						} else if (j + 3 < len && strcasecmp(ts[j+1]->text->str, "IN") == 0 && ts[j+2]->token_id == TK_OBRACE) {
-							k = j + 3;
-							g_array_append_val(columns, k);
-							while ((k += 2) < len && ts[k-1]->token_id != TK_CBRACE) {
-								g_array_append_val(columns, k);
-							}
-						}	
-					}
-				}
-				break;
-			}
-		}
-	} else if (sql_type == 3) {
-		sql_token_id token_id = ts[start]->token_id;
-
-		if (token_id == TK_SQL_SET) {
-			for (i = start+1; i < len-2; ++i) {
-				if (ts[i]->token_id == TK_LITERAL && strcasecmp(ts[i]->text->str, column_name) == 0) {
-					k = i + 2;
-					g_array_append_val(columns, k);
-					break;
-				}
-			}
-		} else {
-			k = 2;
-			if (token_id == TK_OBRACE && start + 1 < len && ts[start + 1]->token_id != TK_CBRACE) {
-				gint found = -1;
-				for (j = start+1; j < len; ++j) {
-					token_id = ts[j]->token_id;
-					if (token_id == TK_CBRACE) break;
-					if (token_id == TK_LITERAL && strcasecmp(ts[j]->text->str, column_name) == 0) {
-						if (ts[j-1]->token_id != TK_DOT || strcasecmp(ts[j-2]->text->str, table_name) == 0) {
-							found = j;
-							break;
-						}
-					}
-				}
-				k = found - start + 1;
-			}
-
-			for (i = start; i < len-1; ++i) {
-				gchar* str = ts[i]->text->str;
-				if ((strcasecmp(str, "VALUES") == 0 || strcasecmp(str, "VALUE") == 0) && ts[i+1]->token_id == TK_OBRACE) {
-					k += i;
-					if (k < len) g_array_append_val(columns, k);
-					break;
-				}
-			}
-		}
-	}
-
-	return columns;
-}
-
-GPtrArray* combine_sql(GPtrArray* tokens, gint table, GArray* columns, db_table_t* dt) {
-	GPtrArray* sqls = g_ptr_array_new();
-
-	sql_token** ts = (sql_token**)(tokens->pdata);
-	guint len = tokens->len;
-	guint i,num;
-	
-	num=dt->table_num;
-	if (columns->len == 1) {
-		GString* sql = g_string_new(&op);
-
-		if (ts[1]->token_id == TK_COMMENT) {
-			g_string_append_printf(sql, "/*%s*/", ts[1]->text->str);
-		} else {
-			g_string_append(sql, ts[1]->text->str);
-		}
-
-		for (i = 2; i < len; ++i) {
-			sql_token_id token_id = ts[i]->token_id;
-
-			if (token_id != TK_OBRACE) g_string_append_c(sql, ' '); 
-			if (i == table) {
-				g_string_append_printf(sql, "%s_%u", ts[i]->text->str, atoi(ts[g_array_index(columns, guint, 0)]->text->str) % num);
-			} else if (token_id == TK_STRING) {
-				g_string_append_printf(sql, "'%s'", ts[i]->text->str);
-			} else if (token_id == TK_COMMENT) {
-				g_string_append_printf(sql, "/*%s*/", ts[i]->text->str);
-			} else if (ts[i]->token_id == TK_LITERAL && strcasecmp(dt->table_name,ts[i]->text->str)==0 && i+1<len && ts[i+1]->token_id==TK_DOT){
-				g_string_append_printf(sql, "%s_%u",dt->table_name,atoi(ts[g_array_index(columns, guint, 0)]->text->str) % num);
-			}else{
-				g_string_append(sql, ts[i]->text->str);
-			}
-		}
-
-		g_ptr_array_add(sqls, sql);
-	} else {
-		GArray* mt[num];
-		for (i = 0; i < num; ++i) mt[i] = g_array_new(FALSE, FALSE, sizeof(guint));
-
-		guint clen = columns->len;
-		for (i = 0; i < clen; ++i) {
-			guint column_value = atoi(ts[g_array_index(columns, guint, i)]->text->str);
-			g_array_append_val(mt[column_value%num], column_value);
-		}
-
-		guint property_index   = g_array_index(columns, guint, 0) - 3;
-		guint start_skip_index = property_index + 1;
-		guint end_skip_index   = property_index + (clen + 1) * 2;
-
-		guint m;
-		for (m = 0; m < num; ++m) {
-			if (mt[m]->len > 0) {
-				GString* tmp = g_string_new(" IN(");
-				g_string_append_printf(tmp, "%u", g_array_index(mt[m], guint, 0));
-				guint k;
-				for (k = 1; k < mt[m]->len; ++k) {
-					g_string_append_printf(tmp, ",%u", g_array_index(mt[m], guint, k));
-				}
-				g_string_append_c(tmp, ')');
-
-				GString* sql = g_string_new(&op);
-				if (ts[1]->token_id == TK_COMMENT) {
-					g_string_append_printf(sql, "/*%s*/", ts[1]->text->str);
-				} else {
-					g_string_append(sql, ts[1]->text->str);
-				}
-				for (i = 2; i < len; ++i) {
-					if (i < start_skip_index || i > end_skip_index) {
-						if (ts[i]->token_id != TK_OBRACE) g_string_append_c(sql, ' ');
-						if (i == table) {
-							g_string_append_printf(sql, "%s_%u", ts[i]->text->str, m);
-						} else if (i == property_index) {
-							g_string_append_printf(sql, "%s%s", ts[i]->text->str, tmp->str);
-						} else if (ts[i]->token_id == TK_COMMENT) {
-							g_string_append_printf(sql, "/*%s*/", ts[i]->text->str);
-						} else if (ts[i]->token_id == TK_LITERAL && strcasecmp(dt->table_name,ts[i]->text->str) == 0 && i+1 < len && ts[i+1]->token_id == TK_DOT){
-							g_string_append_printf(sql, "%s_%u",dt->table_name,m);
-						}else if (ts[i]->token_id == TK_STRING){
-							g_string_append_printf(sql, "'%s'", ts[i]->text->str);
-						}else {
-							g_string_append(sql, ts[i]->text->str);
-						}
-					}
-				}
-				g_string_free(tmp, TRUE);
-
-				g_ptr_array_add(sqls, sql);
-			}
-
-			g_array_free(mt[m], TRUE);
-		}
-	}
-
-	return sqls;
-}
-
-GPtrArray* sql_parse(network_mysqld_con* con, GPtrArray* tokens) {
-	//1. 解析库名和表名
-	gint db, table;
-	guint sql_type = get_table_index(tokens, &db, &table);
-	if (table == -1) return NULL;
-
-	//2. 解析列
-	gchar* table_name = NULL;
-	if (db == -1) {
-		table_name = g_strdup_printf("%s.%s", con->client->default_db->str, ((sql_token*)tokens->pdata[table])->text->str);
-	} else {
-		table_name = g_strdup_printf("%s.%s", ((sql_token*)tokens->pdata[db])->text->str, ((sql_token*)tokens->pdata[table])->text->str);
-	}
-
-	db_table_t* dt = g_hash_table_lookup(con->config->dt_table, table_name);
-	if (dt == NULL) {
-		g_free(table_name);
-		return NULL;
-	}
-
-	GArray* columns = get_column_index(tokens, dt->table_name, dt->column_name, sql_type, table+1);
-	g_free(table_name);
-	if (columns->len == 0) {
-		g_array_free(columns, TRUE);
-		return NULL;
-	}
-
-	//3. 拼接SQL
-	GPtrArray* sqls = combine_sql(tokens, table, columns, dt);
-	g_array_free(columns, TRUE);
-	return sqls;
-}
-
+extern char** charset;
 /**
  * call the lua function to intercept the handshake packet
  *
@@ -1376,11 +1062,11 @@ NETWORK_MYSQLD_PLUGIN_PROTO(proxy_read_query) {
 				else
 					return NETWORK_SOCKET_SUCCESS;
 			} else {
-				GPtrArray* sqls = NULL;
-				if (type == COM_QUERY && con->config->tables) {
-				    sqls = sql_parse(con, tokens);
-				}
-				
+                            GPtrArray* sqls = NULL;
+                            if (type == COM_QUERY && con->config->rule_table) {
+                                   sqls = sql_parse(con, tokens, con->config->rule_table);
+                            }
+
 				ret = PROXY_SEND_INJECTION;
 				injection* inj = NULL;
 				if (sqls == NULL) {
@@ -1689,6 +1375,7 @@ void merge_rows(network_mysqld_con* con, injection* inj) {
 
 			switch (lenenc_type) {
 				case NETWORK_MYSQLD_LENENC_TYPE_NULL:
+                                   g_ptr_array_add(row, NULL);
 					network_mysqld_proto_skip(&packet, 1);
 					break;
 
@@ -1887,7 +1574,7 @@ NETWORK_MYSQLD_PLUGIN_PROTO(proxy_read_query_result) {
 				ret = PROXY_SEND_RESULT;
 			} else if (inj->id == 7) {
 				log_sql(con, inj);
-				if(strcasestr(str,"SELECT")==str) {
+				if(strcasestr(str,"SELECT") != NULL) {
 					merge_res_t* merge_res = con->merge_res;
 					if (inj->qstat.query_status == MYSQLD_PACKET_OK && merge_res->rows->len < merge_res->limit) merge_rows(con, inj);
 
@@ -2319,7 +2006,8 @@ chassis_plugin_config * network_mysqld_proxy_plugin_new(void) {
 	config->ip_table[1]= g_hash_table_new_full(g_int_hash, g_int_equal, g_free, NULL);
 	config->lvs_table = g_hash_table_new_full(g_int_hash, g_int_equal, g_free, NULL);
 	config->dt_table = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, g_free);
-	config->pwd_table[0] = g_hash_table_new(g_str_hash, g_str_equal);
+	config->rule_table = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, shard_rule_free);
+       config->pwd_table[0] = g_hash_table_new(g_str_hash, g_str_equal);
 	config->pwd_table[1] = g_hash_table_new(g_str_hash, g_str_equal);
 	config->sql_log = NULL;
 	config->sql_log_type = NULL;
@@ -2380,7 +2068,8 @@ void network_mysqld_proxy_plugin_free(chassis_plugin_config *config) {
 	g_hash_table_destroy(config->ip_table[0]);
 	g_hash_table_remove_all(config->ip_table[1]);
 	g_hash_table_destroy(config->ip_table[1]);
-	
+       g_hash_table_destroy(config->rule_table);
+        
         if (config->lvs_ips) {
 		for (i = 0; config->lvs_ips[i]; i++) {
 			g_free(config->lvs_ips[i]);
@@ -2766,34 +2455,6 @@ int network_mysqld_proxy_plugin_apply_config(chassis *chas, chassis_plugin_confi
 		g_free(sql_log_filename);
 	}
 
-	for (i = 0; config->tables && config->tables[i]; i++) {
-		db_table_t* dt = g_new0(db_table_t, 1);
-		char *db = NULL, *token = NULL;
-		gboolean is_complete = FALSE;
-
-		if ((db = strsep(&config->tables[i], ".")) != NULL) {
-			if ((token = strsep(&config->tables[i], ".")) != NULL) {
-				dt->table_name = token;
-				if ((token = strsep(&config->tables[i], ".")) != NULL) {
-					dt->column_name = token;
-					if ((token = strsep(&config->tables[i], ".")) != NULL) {
-						dt->table_num = atoi(token);
-						is_complete = TRUE;
-					}
-				}
-			}
-		}
-
-		if (is_complete) {
-			gchar* key = g_strdup_printf("%s.%s", db, dt->table_name);
-			g_hash_table_insert(config->dt_table, key, dt);
-		} else {
-			g_critical("incorrect sub-table settings");
-			g_free(dt);
-			return -1;
-		}
-	}
-
 	for (i = 0; config->pwds && config->pwds[i]; i++) {
 		char *user = NULL, *pwd = NULL;
               gboolean is_complete = FALSE;
@@ -2838,6 +2499,46 @@ int network_mysqld_proxy_plugin_apply_config(chassis *chas, chassis_plugin_confi
 	return 0;
 }
 
+/*get the shard rule from GKeyFile, and insert the shard rule into a hashtable*/
+int proxy_plugin_get_shard_rules(GKeyFile *keyfile, chassis *chas, chassis_plugin_config *config) {
+       GError *gerr = NULL;
+       gchar **groups, **gname, *table_name;
+       shard_rule *item = NULL;
+       gsize length;
+       int i, j;
+
+       network_backends_t *bs = chas->priv->backends;
+       groups = g_key_file_get_groups(keyfile, &length);
+       for(i = 0; i < length; i++) {
+              gname = g_strsplit(groups[i], "-", 2);
+              if(strcasecmp(gname[0], "mysql") == 0) continue;
+              item = shard_rule_new();
+              keyfile_to_shard_rule(keyfile, gname[0], item);
+              get_shard_backend(bs, item);
+              if(strcasecmp(gname[0], "range") == 0) {
+                     gint64 step = item->range_end / item->table_sum;
+                     for(j = 0; j < item->table_sum; j++) {
+                            gint64 boundary = step * (j+1) - 1;
+                            g_array_append_val(item->range_value_array, boundary);
+                     }
+                     item->shard_type = RANGE;
+              } else if(strcasecmp(gname[0], "hash") == 0) {
+                     item->shard_type = HASH;
+              } else if(strcasecmp(gname[0], "year") == 0) {
+                     item->shard_type = YEAR;
+              } else if(strcasecmp(gname[0], "month") == 0) {
+                     item->shard_type = MONTH;
+              } else if(strcasecmp(gname[0], "week") == 0) {
+                     item->shard_type = WEEK;
+              }
+              table_name = g_strdup(item->shard_table);
+              g_hash_table_insert(config->rule_table, table_name, item);
+              g_strfreev(gname);
+       }
+       g_strfreev(groups);
+       return 0;
+}
+
 G_MODULE_EXPORT int plugin_init(chassis_plugin *p) {
 	p->magic        = CHASSIS_PLUGIN_MAGIC;
 	p->name         = g_strdup("proxy");
@@ -2849,6 +2550,7 @@ G_MODULE_EXPORT int plugin_init(chassis_plugin *p) {
 	p->destroy      = network_mysqld_proxy_plugin_free;
        p->insert_clientips = proxy_plugin_insert_clientips;
        p->insert_pwds = proxy_plugin_insert_pwds;
+       p->get_shard_rules = proxy_plugin_get_shard_rules;
 	return 0;
 }
 

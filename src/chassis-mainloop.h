@@ -90,7 +90,7 @@ CHASSIS_API int chassis_check_version(const char *lib_version, const char *hdr_v
  *
  * can be called directly or as gthread_* functions 
  */
-CHASSIS_API int chassis_mainloop(void *user_data);
+CHASSIS_API int chassis_mainloop(void *user_data, GKeyFile* keyfile);
 
 CHASSIS_API void chassis_set_shutdown_location(const gchar* location);
 CHASSIS_API gboolean chassis_is_shutdown(void);
