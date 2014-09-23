@@ -184,7 +184,7 @@ typedef enum {
 
 SQL_LOG_TYPE sql_log_type = OFF;
 
-extern char** charset;
+extern char* charset[64];
 /**
  * call the lua function to intercept the handshake packet
  *
@@ -937,12 +937,13 @@ network_mysqld_lua_stmt_ret handle_stmt_prepare_packet(GString *packet,network_m
 	return PROXY_SEND_INJECTION;
 }
 
-network_mysqld_lua_stmt_ret handle_stmt_execute_packet(GString *packet,network_mysqld_con* con) {
+network_mysqld_lua_stmt_ret handle_stmt_execute_packet(GString *packet,network_mysqld_con *con, GPtrArray *tokens) {
 	int ret;
 	guint32 stmt_id;
 	stmt_params_t *sp;
 	network_packet np;
 	GString *prepare_packet;
+       sql_token** ts;
 	injection *inj_execute = NULL,*inj_prepare = NULL;
 	
 	network_mysqld_con_lua_t *st = con->plugin_con_state;
@@ -967,8 +968,13 @@ network_mysqld_lua_stmt_ret handle_stmt_execute_packet(GString *packet,network_m
 	inj_prepare->resultset_is_needed = TRUE;
 	g_queue_push_head(st->injected.queries, inj_prepare);
 
-	inj_execute = injection_new(1, packet);
-	inj_execute->resultset_is_needed = TRUE;
+       sql_tokenizer(tokens, prepare_packet->str, prepare_packet->len);
+       inj_execute = injection_new(1, packet);
+       ts = (sql_token**)(tokens->pdata);
+       if (ts[1]->token_id == TK_SQL_SELECT || (ts[1]->token_id == TK_COMMENT && ts[2]->token_id == TK_SQL_SELECT))
+              inj_execute->resultset_is_needed = FALSE;
+       else
+              inj_execute->resultset_is_needed = TRUE;
 	g_queue_push_tail(st->injected.queries, inj_execute);
 	
 	return PROXY_SEND_INJECTION;
@@ -1046,13 +1052,14 @@ NETWORK_MYSQLD_PLUGIN_PROTO(proxy_read_query) {
 			} else if (type == COM_STMT_EXECUTE) {
 				//token the insert prepare query
 				injection* inj_tmp = NULL;
-				ret = handle_stmt_execute_packet(packets, con);
-				if (ret == PROXY_NO_DECISION)
-					return NETWORK_SOCKET_ERROR;
-				inj_tmp = g_queue_peek_head(st->injected.queries);
 				sql_tokens_free(tokens);
 				tokens = sql_tokens_new();
-				sql_tokenizer(tokens, inj_tmp->query->str, inj_tmp->query->len);
+                            ret = handle_stmt_execute_packet(packets, con, tokens);
+                            if (ret == PROXY_NO_DECISION) {
+                                   sql_tokens_free(tokens);
+                                   return NETWORK_SOCKET_ERROR;
+                            }
+                            inj_tmp = g_queue_peek_head(st->injected.queries);
 				type = COM_STMT_PREPARE;
 			} else if (type == COM_STMT_CLOSE) {
 				int err;
@@ -1071,7 +1078,11 @@ NETWORK_MYSQLD_PLUGIN_PROTO(proxy_read_query) {
 				injection* inj = NULL;
 				if (sqls == NULL) {
 				    inj = injection_new(1, packets);
-				    inj->resultset_is_needed = TRUE;
+                                sql_token** ts = (sql_token**)(tokens->pdata);
+                                if (ts[1]->token_id == TK_SQL_SELECT || (ts[1]->token_id == TK_COMMENT && ts[2]->token_id == TK_SQL_SELECT))
+                                       inj->resultset_is_needed = FALSE;
+                                else
+                                       inj->resultset_is_needed = TRUE;
 				    g_queue_push_tail(st->injected.queries, inj);
 				} else {
 				    g_string_free(packets, TRUE);

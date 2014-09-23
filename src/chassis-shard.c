@@ -626,13 +626,7 @@ GPtrArray* sql_parse(network_mysqld_con* con, GPtrArray* tokens, GHashTable *rul
        if (table == -1) return NULL;
        gchar* table_name = NULL;
 
-       /*if (db == -1) {
-              table_name = g_strdup_printf("%s.%s", con->client->default_db->str, ((sql_token*)tokens->pdata[table])->text->str);
-       } else {
-              table_name = g_strdup_printf("%s.%s", ((sql_token*)tokens->pdata[db])->text->str, ((sql_token*)tokens->pdata[table])->text->str);
-       }*/
        table_name = g_strdup_printf("%s", ((sql_token*)tokens->pdata[table])->text->str);
-
        shard_rule* rule = g_hash_table_lookup(rule_table, table_name);
        if (rule == NULL) {
               g_free(table_name);
