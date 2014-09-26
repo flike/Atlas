@@ -79,6 +79,7 @@ int get_shard_backend(network_backends_t *bs, shard_rule *sr) {
               }
               g_strfreev(node);
        }
+       g_assert(sr->table_sum);
        return 0;
 }
 
