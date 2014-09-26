@@ -69,6 +69,8 @@ struct chassis_plugin_config {
 	gchar *charset;
        gint check_time;
        gint connect_times;
+       gchar **fsql;
+       GPtrArray *reg_array;
 };
 
 NETWORK_API int network_connection_pool_getmetatable(lua_State *L);

@@ -129,6 +129,8 @@ typedef int socklen_t;
 
 #include <math.h>
 #include <openssl/evp.h>
+#include <regex.h>
+#include <sys/types.h>
 
 #include "network-mysqld.h"
 #include "network-mysqld-proto.h"
@@ -156,6 +158,7 @@ typedef int socklen_t;
 #include "lib/sql-tokenizer.h"
 #include "chassis-event-thread.h"
 #include "chassis-shard.h"
+
 
 #define C(x) x, sizeof(x) - 1
 #define S(x) x->str, x->len
@@ -831,29 +834,22 @@ void check_flags(GPtrArray* tokens, network_mysqld_con* con) {
 	}
 }
 
-gboolean is_in_blacklist(network_mysqld_con* con, GPtrArray* tokens, GString* packets) {
-	guint len = tokens->len;
-	guint i;
-
-	sql_token* token = tokens->pdata[1];
-	if (token->token_id == TK_SQL_DELETE || token->token_id == TK_SQL_UPDATE) {
-		for (i = 2; i < len; ++i) {
-			token = tokens->pdata[i];
-			if (token->token_id == TK_SQL_WHERE) break;
-		}
-		if (i == len) {
+gboolean is_in_blacklist(network_mysqld_con* con, GString* packets) {
+       int i, status;
+       char ebuf[128];
+       chassis_plugin_config *config = con->config;
+       for(i = 0; i < config->reg_array->len; i++) {
+              regex_t *reg = g_ptr_array_index(config->reg_array, i);
+              status = regexec(reg, packets->str, 0, NULL, 0);
+              if(status == 0) {
                      g_message("C:%s Forbidden Sql:\"%s\"", con->client->src->name->str, packets->str + 1);
                      return TRUE;
-              }
-       }
-       for (i = 2; i < len; ++i) {
-              token = tokens->pdata[i];
-              if (token->token_id == TK_OBRACE) {
-                     token = tokens->pdata[i-1];
-                     if (strcasecmp(token->text->str, "SLEEP") == 0) {
-                            g_message("C:%s Forbidden Sql:\"%s\"", con->client->src->name->str, packets->str + 1);
-                            return TRUE;
-                     }
+              }else if(status == REG_NOMATCH) {
+                     continue;
+              }else if(status == REG_ESPACE) {
+                     regerror(status, reg, ebuf, sizeof(ebuf));
+                     g_message("%s:regexec fail, error message:%s",G_STRLOC, ebuf);
+                     return FALSE;
               }
        }
        return FALSE;
@@ -1042,7 +1038,7 @@ NETWORK_MYSQLD_PLUGIN_PROTO(proxy_read_query) {
 		GPtrArray *tokens = sql_tokens_new();
 		sql_tokenizer(tokens, packets->str, packets->len);
         
-	    	if (type == COM_QUERY && is_in_blacklist(con, tokens, packets)) {	
+	    	if (type == COM_QUERY && con->config->reg_array->len && is_in_blacklist(con, packets)) {	
             		g_string_free(packets, TRUE);
 			network_mysqld_con_send_error_full(con->client, C("Proxy Warning - Syntax Forbidden"), ER_UNKNOWN_ERROR, "07000");
 			ret = PROXY_SEND_RESULT;
@@ -2027,6 +2023,8 @@ chassis_plugin_config * network_mysqld_proxy_plugin_new(void) {
        config->pwdtable_index = 0;
        config->connect_times = 1;
        config->check_time = 4;
+	config->fsql = NULL;
+       config->reg_array = g_ptr_array_new();
 
 	//g_mutex_init(&mutex);
 
@@ -2110,6 +2108,15 @@ void network_mysqld_proxy_plugin_free(chassis_plugin_config *config) {
 	if (config->sql_log_type) g_free(config->sql_log_type);
 
 	if (config->charset) g_free(config->charset);
+	if (config->fsql) g_strfreev(config->fsql);
+       if (config->reg_array) {
+              for (i = 0; i < config->reg_array->len; i++) {
+                     regex_t *reg = g_ptr_array_index(config->reg_array, i);
+                     regfree(reg);
+                     g_free(reg);/*regfree does not free the object reg itself*/
+              }
+              g_ptr_array_free(config->reg_array, TRUE);
+       }
 
 	g_free(config);
 
@@ -2152,6 +2159,7 @@ static GOptionEntry * network_mysqld_proxy_plugin_get_options(chassis_plugin_con
 		{ "sql-log", 0, 0, G_OPTION_ARG_STRING, NULL, "sql log type(default: OFF)", NULL },
               { "check_time", 0, 0, G_OPTION_ARG_INT, NULL, "the time interval of checking the backends", NULL},
               { "connect_times", 0, 0, G_OPTION_ARG_INT, NULL, "the times of checking the backends", NULL},
+		{ "forbidden-sql", 0, 0, G_OPTION_ARG_STRING_ARRAY, NULL, "forbidden sql", NULL },
 		{ NULL,                       0, 0, G_OPTION_ARG_NONE,   NULL, NULL, NULL }
 	};
 
@@ -2175,6 +2183,7 @@ static GOptionEntry * network_mysqld_proxy_plugin_get_options(chassis_plugin_con
 	config_entries[i++].arg_data = &(config->sql_log_type);
        config_entries[i++].arg_data = &(config->check_time);
        config_entries[i++].arg_data = &(config->connect_times);
+       config_entries[i++].arg_data = &(config->fsql);
 	return config_entries;
 }
 
@@ -2363,6 +2372,25 @@ int proxy_plugin_insert_pwds(gchar** arg_string_array, chassis_plugin_config *co
         
         return 0;
 }
+
+int get_forbidden_sql(GPtrArray *reg_array, char **fsql) {
+       int i, ret;
+       regex_t *reg = NULL; 
+       char ebuf[128];
+       if(fsql == NULL) return 0;
+       for(i = 0; fsql&&fsql[i]; i++) {
+              reg = g_new0(regex_t, 1);
+              ret = regcomp(reg, fsql[i], REG_EXTENDED|REG_ICASE|REG_NOSUB|REG_NEWLINE);
+              if(ret != 0) {
+                     g_free(reg);
+                     regerror(ret, reg, ebuf, sizeof(ebuf));
+                     g_message("%s:regcomp fail,error message:%s", G_STRLOC, ebuf);
+                     return -1;
+              }
+              g_ptr_array_add(reg_array, reg);
+       }
+       return 0;
+}
 /**
  * init the plugin with the parsed config
  */
@@ -2493,6 +2521,10 @@ int network_mysqld_proxy_plugin_apply_config(chassis *chas, chassis_plugin_confi
 			return -1;
 		}
 	}
+       if( 0 != get_forbidden_sql(config->reg_array, config->fsql)) {
+              g_message("%s:get_forbidden_sql error", G_STRLOC);
+              return -1;
+       }
 
 	/* load the script and setup the global tables */
 	network_mysqld_lua_setup_global(chas->priv->sc->L, g, chas);
