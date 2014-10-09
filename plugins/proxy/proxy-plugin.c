@@ -1409,17 +1409,18 @@ void log_sql(network_mysqld_con* con, injection* inj) {
 	if (sql_log_type == OFF) return;
 
 	chassis_plugin_config *config = con->config;
-	GString* message = g_string_new(NULL);
+       double latency_ms = (inj->ts_read_query_result_last - inj->ts_read_query)/1000.0;
+       if ((gint)latency_ms < config->sql_log_slow_ms) return;
 
+	GString* message = g_string_new(NULL);
 	time_t t = time(NULL);
 	struct tm* tm = localtime(&t);
 	g_string_printf(message, "[%02d/%02d/%d %02d:%02d:%02d] C:%s S:", tm->tm_mon+1, tm->tm_mday, tm->tm_year+1900, tm->tm_hour, tm->tm_min, tm->tm_sec, con->client->src->name->str);
-	gint latency = inj->ts_read_query_result_last - inj->ts_read_query;
 
 	if (inj->qstat.query_status == MYSQLD_PACKET_OK) {
-		g_string_append_printf(message, "%s OK %.3f \"%s\"\n", con->server->dst->name->str, latency/1000.0, inj->query->str+1);
+		g_string_append_printf(message, "%s OK %.3f \"%s\"\n", con->server->dst->name->str, latency_ms, inj->query->str+1);
 	} else {
-		g_string_append_printf(message, "%s ERR %.3f \"%s\"\n", con->server->dst->name->str, latency/1000.0, inj->query->str+1);
+		g_string_append_printf(message, "%s ERR %.3f \"%s\"\n", con->server->dst->name->str, latency_ms, inj->query->str+1);
 	}
 
 	fwrite(message->str, message->len, 1, config->sql_log);
@@ -2025,6 +2026,7 @@ chassis_plugin_config * network_mysqld_proxy_plugin_new(void) {
        config->check_time = 4;
 	config->fsql = NULL;
        config->reg_array = g_ptr_array_new();
+       config->sql_log_slow_ms = 0;
 
 	//g_mutex_init(&mutex);
 
@@ -2157,6 +2159,7 @@ static GOptionEntry * network_mysqld_proxy_plugin_get_options(chassis_plugin_con
 		{ "charset", 0, 0, G_OPTION_ARG_STRING, NULL, "original charset(default: LATIN1)", NULL },
 
 		{ "sql-log", 0, 0, G_OPTION_ARG_STRING, NULL, "sql log type(default: OFF)", NULL },
+              { "sql-log-slow", 0, 0, G_OPTION_ARG_INT, NULL, "only log sql which takes longer than this milliseconds (default: 0)", NULL },
               { "check_time", 0, 0, G_OPTION_ARG_INT, NULL, "the time interval of checking the backends", NULL},
               { "connect_times", 0, 0, G_OPTION_ARG_INT, NULL, "the times of checking the backends", NULL},
 		{ "forbidden-sql", 0, 0, G_OPTION_ARG_STRING_ARRAY, NULL, "forbidden sql", NULL },
@@ -2181,6 +2184,7 @@ static GOptionEntry * network_mysqld_proxy_plugin_get_options(chassis_plugin_con
 	config_entries[i++].arg_data = &(config->pwds);
 	config_entries[i++].arg_data = &(config->charset);
 	config_entries[i++].arg_data = &(config->sql_log_type);
+	config_entries[i++].arg_data = &(config->sql_log_slow_ms);
        config_entries[i++].arg_data = &(config->check_time);
        config_entries[i++].arg_data = &(config->connect_times);
        config_entries[i++].arg_data = &(config->fsql);
