@@ -312,10 +312,15 @@ network_socket* network_connection_pool_lua_swap(network_mysqld_con *con, int ba
 		/**
 		 * no connections in the pool
 		 */
-		if (NULL == (send_sock = self_connect(con, backend))) {
-			st->backend_ndx = -1;
-			return NULL;
-		}
+              if ((con->config->max_connections <= 0) || (backend->connected_clients < con->config->max_connections)) {
+                     if (NULL == (send_sock = self_connect(con, backend))) {
+                            st->backend_ndx = -1;
+                            return NULL;
+                     }
+              } else {
+                     st->backend_ndx = -1;
+                     return NULL;
+              }
 	}
 
 	/* the backend is up and cool, take and move the current backend into the pool */

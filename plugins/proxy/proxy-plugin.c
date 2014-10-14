@@ -2163,6 +2163,7 @@ static GOptionEntry * network_mysqld_proxy_plugin_get_options(chassis_plugin_con
               { "check_time", 0, 0, G_OPTION_ARG_INT, NULL, "the time interval of checking the backends", NULL},
               { "connect_times", 0, 0, G_OPTION_ARG_INT, NULL, "the times of checking the backends", NULL},
 		{ "forbidden-sql", 0, 0, G_OPTION_ARG_STRING_ARRAY, NULL, "forbidden sql", NULL },
+              { "max-connections", 0, 0, G_OPTION_ARG_INT, NULL, "the max connections of one DB (default:0)", NULL },
 		{ NULL,                       0, 0, G_OPTION_ARG_NONE,   NULL, NULL, NULL }
 	};
 
@@ -2188,6 +2189,7 @@ static GOptionEntry * network_mysqld_proxy_plugin_get_options(chassis_plugin_con
        config_entries[i++].arg_data = &(config->check_time);
        config_entries[i++].arg_data = &(config->connect_times);
        config_entries[i++].arg_data = &(config->fsql);
+       config_entries[i++].arg_data = &(config->max_connections);
 	return config_entries;
 }
 

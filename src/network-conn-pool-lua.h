@@ -73,6 +73,7 @@ struct chassis_plugin_config {
        GPtrArray *reg_array;
 
        gint sql_log_slow_ms;
+       gint max_connections;
 };
 
 NETWORK_API int network_connection_pool_getmetatable(lua_State *L);
