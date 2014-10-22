@@ -20,12 +20,15 @@
 
 #include <stdlib.h> 
 #include <string.h>
+#include <openssl/evp.h>
 
 #include <glib.h>
 
 #include "network-mysqld-packet.h"
 #include "network-backend.h"
 #include "chassis-plugin.h"
+#include "chassis-mainloop.h"
+#include "network-conn-pool-lua.h"
 #include "glib-ext.h"
 
 #define C(x) x, sizeof(x) - 1
@@ -278,27 +281,155 @@ network_backend_t* network_get_backend_by_addr(network_backends_t *bs, char* add
        return NULL;
 }
 
-int network_backends_save_to_config(network_backends_t *bs, gchar* config_path) {
-        int i, len, file_size = 0, first_append_master = 1, first_append_slave = 1, first_append_standby = 1;
-        GKeyFile* keyfile;
+void copy_key(gchar *key, GString *value, GHashTable *new_table) {
+       gchar *new_key = g_strdup(key);
+       GString *new_value = g_string_new(value->str);
+       g_hash_table_insert(new_table, new_key, new_value);
+}
+
+int network_backends_add_pwds(chassis *srv, gchar *pwds) {
+       int i, j;
+       gchar **pwds_vec, **user_pwd;
+       chassis_plugin *p = srv->modules->pdata[1];/*proxy plugin*/
+       chassis_plugin_config *config = p->config;
+       GHashTable *new_table = config->pwd_table[1 - config->pwdtable_index];
+       GHashTable *old_table = config->pwd_table[config->pwdtable_index];
+       user_password *up;
+       
+       g_hash_table_remove_all(new_table);
+       g_hash_table_foreach(old_table, copy_key, new_table);
+       pwds_vec = g_strsplit(pwds, ",", 50);
+       for (j = 0; pwds_vec && pwds_vec[j]; j++) {
+              user_pwd = g_strsplit(pwds_vec[j], ":", 2);
+              if(!user_pwd[0] || !user_pwd[1]) {
+                     g_critical("%s:incorrect password settings", G_STRLOC);
+                     g_strfreev(pwds_vec);
+                     return -1;
+              }
+              GString* hashed_password = g_string_new(NULL);
+              user_pwd[0] = g_strstrip(user_pwd[0]);
+              user_pwd[1] = g_strstrip(user_pwd[1]);
+              network_mysqld_proto_password_hash(hashed_password, user_pwd[1], strlen(user_pwd[1]));
+              g_hash_table_insert(new_table, user_pwd[0], hashed_password);
+              up = g_new0(user_password, 1);
+              up->user = g_strdup(user_pwd[0]);
+              up->pwd = g_strdup(user_pwd[1]);
+              g_ptr_array_add(srv->user_vec, up);
+       }
+       g_strfreev(pwds_vec);
+
+       if(config->pwdtable_index == 0) 
+              g_atomic_int_inc(&(config->pwdtable_index));
+       else if(config->pwdtable_index == 1) 
+              g_atomic_int_dec_and_test(&(config->pwdtable_index));
+       
+       return 0;
+}
+
+int network_backends_remove_pwds(chassis *srv, gchar *users) {
+       int i, j;
+       gboolean is_delete = FALSE;
+       gchar **users_vec;
+       
+       chassis_plugin *p = srv->modules->pdata[1];/*proxy plugin*/
+       chassis_plugin_config *config = p->config;
+       GHashTable *new_table = config->pwd_table[1 - config->pwdtable_index];
+       GHashTable *old_table = config->pwd_table[config->pwdtable_index];
+       
+       g_hash_table_remove_all(new_table);
+       g_hash_table_foreach(old_table, copy_key, new_table);
+       users_vec = g_strsplit(users, ",", 50);
+       for(j = 0; users_vec && users_vec[j]; j++) {
+              is_delete = g_hash_table_remove(new_table, users_vec[j]);
+              if(is_delete == FALSE) g_message("%s:delete %s from pwd_table failed", G_STRLOC, users_vec[j]);
+              for(i = 0; i < srv->user_vec->len; i++) {
+                     user_password *up = srv->user_vec->pdata[i];
+                     if(strcmp(up->user, users_vec[j]) == 0) {
+                            g_free(up->user);
+                            g_free(up->pwd);
+                            g_free(up);
+                            g_ptr_array_remove_index(srv->user_vec, i);
+                     }
+              }
+       }
+       g_strfreev(users_vec);
+       
+       if(config->pwdtable_index == 0) 
+              g_atomic_int_inc(&(config->pwdtable_index));
+       else if(config->pwdtable_index == 1) 
+              g_atomic_int_dec_and_test(&(config->pwdtable_index));
+
+       return 0;
+}
+
+int network_pwds_save_config(GKeyFile* keyfile, GPtrArray* user_vec, gchar* config_path) {
+       int i;
+       char *password;
+       user_password *up;
+       GString *pwds = g_string_new(NULL);
+       
+       for(i = 0; i < user_vec->len; i++) {
+              up = user_vec->pdata[i];
+              g_string_append(pwds, up->user);
+              g_string_append(pwds, ":");
+              password = pwds_encrypt(up->pwd);
+              if(password) {
+                     g_string_append(pwds, password);
+                     g_free(password);
+              }
+              g_string_append(pwds, ",");
+       }
+       
+       g_string_erase(pwds, pwds->len - 1, 1); /*erase the last comma*/
+       g_key_file_set_string(keyfile, "mysql-proxy", "pwds", pwds->str);
+       g_string_free(pwds, TRUE);
+       
+       return 0;
+}
+
+gchar* ip_to_str(guint ip) {
+       int i;
+       guint ip_seg[4];
+       gchar *buf = g_new0(gchar, 64);
+       guint value = ntohl(ip);
+       for(i = 3; 0 <= i; i--) {
+              ip_seg[i] = value % 256;
+              value = (value - ip_seg[i]) / 256;
+       }   
+       sprintf(buf, "%d.%d.%d.%d", ip_seg[0], ip_seg[1], ip_seg[2], ip_seg[3]);
+       return buf;
+}
+
+int network_clientip_save_config(GKeyFile* keyfile, GPtrArray *clientip_vec, gchar* config_path) {
+       int i;
+       gchar *addr;
+       guint ip_num;
+       GString *client_ip_str = g_string_new(NULL);
+       
+       for(i = 0; i < clientip_vec->len; i++) {
+              ip_num = *(guint*)clientip_vec->pdata[i];
+              addr = ip_to_str(ip_num);
+              g_string_append(client_ip_str, addr);
+              g_string_append(client_ip_str, ",");
+              g_free(addr);
+       }
+       
+       g_string_erase(client_ip_str, client_ip_str->len - 1, 1); /*erase the last comma*/
+       g_key_file_set_string(keyfile, "mysql-proxy", "client-ips", client_ip_str->str);
+       g_string_free(client_ip_str, TRUE);
+       
+       return 0;
+}
+
+int network_backends_save_config(GKeyFile* keyfile, network_backends_t *bs, gchar* config_path) {
+        int i, len, first_append_master = 1, first_append_slave = 1, first_append_standby = 1;
         network_backend_t *backend;
         GString *master, *slave, *standby;
-        GError *gerr = NULL;
-        gchar* file_buf = NULL;
 
         master = g_string_new(NULL);
         slave = g_string_new(NULL);
         standby = g_string_new(NULL);
-        keyfile = g_key_file_new();
-        g_key_file_set_list_separator(keyfile, ',');
-        if (FALSE == g_key_file_load_from_file(keyfile, config_path, G_KEY_FILE_NONE, NULL)) {
-                g_message("%s:load %s error,load config file failed", G_STRLOC, config_path);
-                g_string_free(master, TRUE);
-                g_string_free(slave, TRUE);
-                g_string_free(standby, TRUE);
-                g_key_file_free(keyfile);
-                return -1;
-        }
+        
         g_mutex_lock(bs->backends_mutex);
         len = bs->backends->len;
         for (i = 0; i < len; i++) {
@@ -330,6 +461,7 @@ int network_backends_save_to_config(network_backends_t *bs, gchar* config_path) 
                 }
         }
         g_mutex_unlock(bs->backends_mutex);
+
         if (master->len != 0)
                 g_key_file_set_string(keyfile, "mysql-proxy", "proxy-backend-addresses", master->str);
         else
@@ -344,23 +476,140 @@ int network_backends_save_to_config(network_backends_t *bs, gchar* config_path) 
                 g_key_file_set_string(keyfile, "mysql-proxy", "proxy-master-standby-address", standby->str);
         else
                 g_key_file_set_string(keyfile, "mysql-proxy", "proxy-master-standby-address", "");
-        file_buf = g_key_file_to_data(keyfile, &file_size, &gerr);
-        if (file_buf) {
-                if (FALSE == g_file_set_contents(config_path, file_buf, file_size, &gerr)) {
-                        g_message("%s:g_file_set_contents, gerr is:%s", G_STRLOC, gerr->message);
-                        g_error_free(gerr);
-                        gerr = NULL;
-                        g_message("%s:save to config failure", G_STRLOC);
-                } else {
-                        g_message("%s:save to config success", G_STRLOC);
-                }
-                g_free(file_buf);
-        } else {
-                g_message("%s:save to config failure", G_STRLOC); 
-        }
+        
         g_string_free(master, TRUE);
         g_string_free(slave, TRUE);
         g_string_free(standby, TRUE);
-        g_key_file_free(keyfile);
+        
         return 0;
-}                          
+}
+
+int network_save_config(chassis *chas) {
+       int file_size = 0;
+       GKeyFile* keyfile;
+       GError *gerr = NULL;
+       gchar* file_buf = NULL;
+       gchar* config_path = chas->priv->backends->config_path;
+
+       keyfile = g_key_file_new();
+       g_key_file_set_list_separator(keyfile, ',');
+       if (FALSE == g_key_file_load_from_file(keyfile, config_path, G_KEY_FILE_NONE, NULL)) {
+              g_message("%s:load %s error,load config file failed", G_STRLOC, config_path);
+              g_key_file_free(keyfile);
+              return -1;
+       }
+       
+       network_backends_save_config(keyfile, chas->priv->backends, config_path);
+       network_clientip_save_config(keyfile, chas->clientip_vec, config_path);
+       network_pwds_save_config(keyfile, chas->user_vec, config_path);
+
+       file_buf = g_key_file_to_data(keyfile, &file_size, &gerr);
+       if (file_buf) {
+              if (FALSE == g_file_set_contents(config_path, file_buf, file_size, &gerr)) {
+                     g_message("%s:g_file_set_contents, gerr is:%s", G_STRLOC, gerr->message);
+                     g_error_free(gerr);
+                     gerr = NULL;
+                     g_message("%s:save to config failure", G_STRLOC);
+              } else {
+                     g_message("%s:save to config success", G_STRLOC);
+              }
+              g_free(file_buf);
+       } else {
+              g_message("%s:save to config failure", G_STRLOC); 
+       }
+       g_key_file_free(keyfile);
+       
+       return 0;
+}
+
+char* pwds_decrypt(char* in) {
+        //1. Base64解码
+       EVP_ENCODE_CTX dctx;
+       EVP_DecodeInit(&dctx);
+
+       int inl = strlen(in);
+       unsigned char inter[512] = {};
+       int interl = 0;
+
+       if (EVP_DecodeUpdate(&dctx, inter, &interl, in, inl) == -1) return NULL;
+       int len = interl;
+       if (EVP_DecodeFinal(&dctx, inter+len, &interl) != 1) return NULL;
+       len += interl;
+
+       //2. DES解码
+       EVP_CIPHER_CTX ctx;
+       EVP_CIPHER_CTX_init(&ctx);
+       const EVP_CIPHER* cipher = EVP_des_ecb();
+
+       unsigned char key[] = "aCtZlHaUs";
+       if (EVP_DecryptInit_ex(&ctx, cipher, NULL, key, NULL) != 1) return NULL;
+
+       char* out = g_malloc0(512);
+       int outl = 0;
+
+       if (EVP_DecryptUpdate(&ctx, out, &outl, inter, len) != 1) {
+              g_free(out);
+              return NULL;
+       }
+       len = outl;
+       if (EVP_DecryptFinal_ex(&ctx, out+len, &outl) != 1) {
+              g_free(out);
+              return NULL;
+       }
+       len += outl;
+
+       EVP_CIPHER_CTX_cleanup(&ctx);
+
+       out[len] = '\0';
+       return out;
+}
+
+char* pwds_encrypt(char *in) {
+       EVP_CIPHER_CTX ctx;
+       const EVP_CIPHER* cipher = EVP_des_ecb();
+       unsigned char key[] = "aCtZlHaUs";
+       int i, LEN = 1024;
+       unsigned char *out;
+
+       out = g_new0(unsigned char, 1024);
+       //1. DES加密
+       EVP_CIPHER_CTX_init(&ctx);
+       if (EVP_EncryptInit_ex(&ctx, cipher, NULL, key, NULL) != 1) {
+              g_message("%s:加密初始化错误", G_STRLOC);
+              g_free(out);
+              return NULL;
+       }
+
+       int inl = strlen(in);
+       unsigned char inter[LEN];
+       bzero(inter, LEN);
+       int interl = 0;
+
+       if (EVP_EncryptUpdate(&ctx, inter, &interl, in, inl) != 1) {
+              g_message("%s:加密更新错误", G_STRLOC);
+              g_free(out);
+              return NULL;
+       }
+       int len = interl;
+       if (EVP_EncryptFinal_ex(&ctx, inter+len, &interl) != 1) {
+              g_message("%s:加密结束错误", G_STRLOC);
+              g_free(out);
+              return NULL;
+       }
+       len += interl;
+       EVP_CIPHER_CTX_cleanup(&ctx);
+
+       //2. Base64编码
+       EVP_ENCODE_CTX ectx;
+       EVP_EncodeInit(&ectx);
+
+       int outl = 0;
+       EVP_EncodeUpdate(&ectx, out, &outl, inter, len);
+       len = outl;
+       EVP_EncodeFinal(&ectx, out+len, &outl);
+       len += outl;
+
+       if (out[len-1] == 10) out[len-1] = '\0';
+       
+       return out;
+}

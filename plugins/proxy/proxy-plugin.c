@@ -188,6 +188,7 @@ typedef enum {
 SQL_LOG_TYPE sql_log_type = OFF;
 
 extern char* charset[64];
+extern chassis *srv;
 /**
  * call the lua function to intercept the handshake packet
  *
@@ -2204,48 +2205,6 @@ void handler(int sig) {
 	}
 }
 
-char* decrypt(char* in) {
-	//1. Base64½âÂë
-	EVP_ENCODE_CTX dctx;
-	EVP_DecodeInit(&dctx);
-
-	int inl = strlen(in);
-	unsigned char inter[512] = {};
-	int interl = 0;
-
-	if (EVP_DecodeUpdate(&dctx, inter, &interl, in, inl) == -1) return NULL;
-	int len = interl;
-	if (EVP_DecodeFinal(&dctx, inter+len, &interl) != 1) return NULL;
-	len += interl;
-
-	//2. DES½âÂë
-	EVP_CIPHER_CTX ctx;
-	EVP_CIPHER_CTX_init(&ctx);
-	const EVP_CIPHER* cipher = EVP_des_ecb();
-
-	unsigned char key[] = "aCtZlHaUs";
-	if (EVP_DecryptInit_ex(&ctx, cipher, NULL, key, NULL) != 1) return NULL;
-
-	char* out = g_malloc0(512);
-	int outl = 0;
-
-	if (EVP_DecryptUpdate(&ctx, out, &outl, inter, len) != 1) {
-		g_free(out);
-		return NULL;
-	}
-	len = outl;
-	if (EVP_DecryptFinal_ex(&ctx, out+len, &outl) != 1) {
-		g_free(out);
-		return NULL;
-	}
-	len += outl;
-
-	EVP_CIPHER_CTX_cleanup(&ctx);
-
-	out[len] = '\0';
-	return out;
-}
-
 void* check_state(chassis *chas) {
 	MYSQL mysql;
        gint i, tm = 1;
@@ -2258,7 +2217,7 @@ void* check_state(chassis *chas) {
               pwds_str = strdup(config->pwds[0]);
               user = strsep(&pwds_str, ":");
               pwd_encr = strsep(&pwds_str, ":");
-              pwd_decr = decrypt(pwd_encr);
+              pwd_decr = pwds_decrypt(pwd_encr);
        }
 	sleep(1);
 	while (TRUE) {
@@ -2308,7 +2267,7 @@ void* check_state(chassis *chas) {
 }
 
 void proxy_plugin_insert_clientips(gchar** arg_string_array, chassis_plugin_config *config) {
-        int j;
+        int i, j;
         char* token;
         guint* sum = NULL;
         
@@ -2317,6 +2276,16 @@ void proxy_plugin_insert_clientips(gchar** arg_string_array, chassis_plugin_conf
         }else if (config->iptable_index == 1) {
                 g_hash_table_remove_all(config->ip_table[0]);
         }
+        
+        GPtrArray *clientip_vec = srv->clientip_vec;
+        if(clientip_vec) {
+               for(i = 0; i < clientip_vec->len; i++) {
+                      guint *item = clientip_vec->pdata[i];
+                      g_free(item);
+               }   
+        }   
+        g_ptr_array_remove_range(clientip_vec, 0, clientip_vec->len);
+
         for (j = 0; arg_string_array && arg_string_array[j]; j++) {
                 arg_string_array[j] = g_strstrip(arg_string_array[j]);
                 sum = g_new0(guint, 1); 
@@ -2329,6 +2298,9 @@ void proxy_plugin_insert_clientips(gchar** arg_string_array, chassis_plugin_conf
                 }else if (config->iptable_index == 1) {
                         g_hash_table_add(config->ip_table[0], sum);
                 } 
+                guint* sum_copy = g_new0(guint, 1);
+                *sum_copy = *sum;
+                g_ptr_array_add(srv->clientip_vec, sum_copy);
         }
         if (config->iptable_index == 0) 
                 g_atomic_int_inc(&(config->iptable_index));
@@ -2339,8 +2311,16 @@ void proxy_plugin_insert_clientips(gchar** arg_string_array, chassis_plugin_conf
 int proxy_plugin_insert_pwds(gchar** arg_string_array, chassis_plugin_config *config) {
         char *user = NULL, *pwd = NULL;
         gboolean is_complete = FALSE;
-        int j;
-
+        user_password *up;
+        int i, j;
+        for(i = 0; i < srv->user_vec->len; i++) {
+               user_password *item = srv->user_vec->pdata[i];
+               g_free(item->user);
+               g_free(item->pwd);
+               g_free(item);
+        }
+        if(srv->user_vec->len)
+               g_ptr_array_remove_range(srv->user_vec, 0, srv->user_vec->len);
         if (config->pwdtable_index == 0) {
                 g_hash_table_remove_all(config->pwd_table[1]);
         }else if(config->pwdtable_index == 1) {
@@ -2353,14 +2333,18 @@ int proxy_plugin_insert_pwds(gchar** arg_string_array, chassis_plugin_config *co
                         }
                 }
                 if (is_complete) {
-                        char* raw_pwd = decrypt(pwd);
+                        char* raw_pwd = pwds_decrypt(pwd);
                         if (raw_pwd) {
                                 GString* hashed_password = g_string_new(NULL);
                                 network_mysqld_proto_password_hash(hashed_password, raw_pwd, strlen(raw_pwd));
                                 if (config->pwdtable_index == 0)
                                         g_hash_table_insert(config->pwd_table[1], user, hashed_password);
                                 else if(config->pwdtable_index == 1)
-                                        g_hash_table_insert(config->pwd_table[0], user, hashed_password)  ;
+                                       g_hash_table_insert(config->pwd_table[0], user, hashed_password)  ;
+                                up = g_new0(user_password, 1);
+                                up->user = g_strdup(user);
+                                up->pwd = g_strdup(raw_pwd);
+                                g_ptr_array_add(srv->user_vec, up);
                                 g_free(raw_pwd);
                         } else {
                                 g_critical("password decrypt failed");
@@ -2465,12 +2449,15 @@ int network_mysqld_proxy_plugin_apply_config(chassis *chas, chassis_plugin_confi
 
 	for (i = 0; config->client_ips && config->client_ips[i]; i++) {
 		guint* sum = g_new0(guint, 1);
+              guint* sum_copy = g_new0(guint, 1);
 		char* token;
 		while ((token = strsep(&config->client_ips[i], ".")) != NULL) {
 			*sum = (*sum << 8) + atoi(token);
 		}
 		*sum = htonl(*sum);
 		g_hash_table_add(config->ip_table[0], sum);
+              *sum_copy = *sum;
+              g_ptr_array_add(srv->clientip_vec, sum_copy); 
 	}
 
 	for (i = 0; config->lvs_ips && config->lvs_ips[i]; i++) {
@@ -2499,7 +2486,6 @@ int network_mysqld_proxy_plugin_apply_config(chassis *chas, chassis_plugin_confi
 		}
 		g_free(sql_log_filename);
 	}
-
 	for (i = 0; config->pwds && config->pwds[i]; i++) {
 		char *user = NULL, *pwd = NULL;
               gboolean is_complete = FALSE;
@@ -2511,12 +2497,16 @@ int network_mysqld_proxy_plugin_apply_config(chassis *chas, chassis_plugin_confi
 		}
 
 		if (is_complete) {
-			char* raw_pwd = decrypt(pwd);
+			char* raw_pwd = pwds_decrypt(pwd);
 			if (raw_pwd) {
 				GString* hashed_password = g_string_new(NULL);
 				network_mysqld_proto_password_hash(hashed_password, raw_pwd, strlen(raw_pwd));
 
 				g_hash_table_insert(config->pwd_table[0], user, hashed_password);
+                            user_password *up = g_new0(user_password, 1);
+                            up->user = g_strdup(user);
+                            up->pwd = g_strdup(raw_pwd);
+                            g_ptr_array_add(srv->user_vec, up);
                             g_free(raw_pwd);
 			} else {
 				g_critical("password decrypt failed");

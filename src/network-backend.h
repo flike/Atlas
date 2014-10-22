@@ -93,9 +93,12 @@ NETWORK_API guint network_backends_count(network_backends_t *backends);
 NETWORK_API network_backend_t* network_get_backend_by_type(network_backends_t *bs, backend_type_t type);
 NETWORK_API network_backend_t* network_get_backend_by_addr(network_backends_t *bs, char* addr);
 NETWORK_API int network_backends_save_to_config(network_backends_t *bs, gchar* config_path);
+NETWORK_API int network_backends_add_pwds(chassis *srv, gchar *pwds);
 
 NETWORK_API g_wrr_poll *g_wrr_poll_new();
 NETWORK_API void g_wrr_poll_free(g_wrr_poll *global_wrr);
-
+NETWORK_API char* pwds_decrypt(char* in);
+NETWORK_API char* pwds_encrypt(char* in);
+NETWORK_API gchar* ip_to_str(guint ip);
 #endif /* _BACKEND_H_ */
 

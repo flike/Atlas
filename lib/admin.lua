@@ -134,10 +134,6 @@ function read_query(packet)
 			  type = proxy.MYSQL_TYPE_STRING },
 			{ name = "type",
 			  type = proxy.MYSQL_TYPE_STRING },
-		--	{ name = "uuid",
-		--	  type = proxy.MYSQL_TYPE_STRING },
-		--	{ name = "connected_clients", 
-		--	  type = proxy.MYSQL_TYPE_LONG },
 		}
 
 		local states = {
@@ -150,7 +146,7 @@ function read_query(packet)
 			"unknown",
 			"rw",
 			"ro",
-                        "sy"
+                     "sy"
 		}
 		local b = proxy.global.backends[id]
 
@@ -159,8 +155,6 @@ function read_query(packet)
 			b.dst.name,          -- configured backend address
 			states[b.state + 1], -- the C-id is pushed down starting at 0
 			types[b.type + 1],   -- the C-id is pushed down starting at 0
-		--	b.uuid,              -- the MySQL Server's UUID if it is managed
-		--	b.connected_clients  -- currently connected clients
 		}
 	elseif string.find(query:lower(), "^add%s+master%s+.+$") then
         	local newserver = string.match(query:lower(), "^add%s+master%s+(.+)$")
@@ -211,6 +205,54 @@ function read_query(packet)
 				  type = proxy.MYSQL_TYPE_STRING },
 			}
 		end
+	elseif string.find(query:lower(), "^add%s+pwds%s+.+$") then
+        	local newserver = string.match(query:lower(), "^add%s+pwds%s+(.+)$")
+        	proxy.global.backends.addpwds = newserver
+		if proxy.global.config.rwsplit then proxy.global.config.rwsplit.max_weight = -1 end
+
+		fields = {
+			{ name = "status", 
+			  type = proxy.MYSQL_TYPE_STRING },
+		}
+       elseif string.find(query:lower(), "^remove%s+pwds%s+.+$") then
+              local newserver = string.match(query:lower(), "^remove%s+pwds%s+(.+)$")
+              proxy.global.backends.removepwds = newserver
+              if proxy.global.config.rwsplit then proxy.global.config.rwsplit.max_weight = -1 end
+
+              fields = {
+                     { name = "status", 
+                     type = proxy.MYSQL_TYPE_STRING },
+              }
+       elseif string.find(query:lower(), "^select%s+*%s+from%s+pwds$") then
+              fields = { 
+                     { name = "id", 
+                     type = proxy.MYSQL_TYPE_LONG },
+                     { name = "user", 
+                     type = proxy.MYSQL_TYPE_STRING },
+                     { name = "password", 
+                     type = proxy.MYSQL_TYPE_STRING },
+              }
+              for i=1, #proxy.global.user_vec do
+                     local b = proxy.global.user_vec[i]
+                     rows[#rows + 1] = {
+                            i,
+                            b.user,
+                            b.pwd,
+                     }
+              end
+       elseif string.find(query:lower(), "^select%s+*%s+from%s+clientip$") then
+              fields = { 
+                     { name = "id", 
+                     type = proxy.MYSQL_TYPE_LONG },
+                     { name = "client_ip", 
+                     type = proxy.MYSQL_TYPE_STRING },
+              }
+              for i=1, #proxy.global.clientip_vec do
+                     rows[#rows + 1] = {
+                            i,
+                            proxy.global.clientip_vec[i],
+                     }
+              end
         elseif string.find(query:lower(), "^save%s+config+$") then                                                                   
                 if proxy.global.config.rwsplit then proxy.global.config.rwsplit.max_weight = -1 end 
                 local newserver = string.match(query:lower(), "^save%s+config+$");
@@ -235,7 +277,11 @@ function read_query(packet)
               rows[#rows + 1] = { "ADD SLAVE $backend", "example: \"add slave 127.0.0.1:3306\", ..." }
               rows[#rows + 1] = { "ADD STANDBY $backend", "example: \"add standby 127.0.0.1:3306\", ..." }
               rows[#rows + 1] = { "REMOVE BACKEND $backend_id", "example: \"remove backend 1\", ..." }
-              rows[#rows + 1] = { "SAVE CONFIG", "save the backends to config file" }
+              rows[#rows + 1] = { "ADD PWDS $pwds", "example: \"add pwds test_dev:Atlas, test is user name, Atlas is the password\", ..." }
+              rows[#rows + 1] = { "REMOVE PWDS $user", "example: \"remove pwds test_dev, test is user name\", ..." }
+		rows[#rows + 1] = { "SELECT * FROM pwds", "lists the users and their passwords" }
+		rows[#rows + 1] = { "SELECT * FROM clientip", "lists the option(client-ips) in config file" }
+              rows[#rows + 1] = { "SAVE CONFIG", "save the backends, pwds and client-ips to config file" }
 	else
 		set_error("use 'SELECT * FROM help' to see the supported commands")
 		return proxy.PROXY_SEND_RESULT

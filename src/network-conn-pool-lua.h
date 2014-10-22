@@ -21,7 +21,7 @@
 #define __NETWORK_CONN_POOL_LUA_H__
 
 #include <lua.h>
-
+#include <stdio.h>
 #include "network-socket.h"
 #include "network-mysqld.h"
 

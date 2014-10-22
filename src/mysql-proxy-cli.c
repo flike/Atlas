@@ -253,8 +253,9 @@ static void sigsegv_handler(int G_GNUC_UNUSED signum) {
  * For the Windows service case, this will also handle the notifications and set
  * up the logging support appropriately.
  */
+extern chassis *srv;
 int main_cmdline(int argc, char **argv) {
-	chassis *srv = NULL;
+	//chassis *srv = NULL;
 #ifdef HAVE_SIGACTION
 	static struct sigaction sigsegv_sa;
 #endif

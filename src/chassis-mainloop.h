@@ -53,6 +53,12 @@
 typedef struct chassis_private chassis_private;
 typedef struct chassis chassis;
 
+struct user_password {
+       gchar *user;
+       gchar *pwd;
+};
+typedef struct user_password user_password;
+
 struct chassis {
 	struct event_base *event_base;
 	gchar *event_hdr_version;
@@ -78,6 +84,8 @@ struct chassis {
 	GPtrArray *threads;
 
 	chassis_shutdown_hooks_t *shutdown_hooks;
+       GPtrArray *user_vec;
+       GPtrArray *clientip_vec;
 };
 
 CHASSIS_API chassis *chassis_init(void) G_GNUC_DEPRECATED;

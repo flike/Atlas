@@ -56,6 +56,7 @@ static volatile int signal_shutdown;
 static volatile sig_atomic_t signal_shutdown;
 #endif
 
+chassis *srv = NULL;
 /**
  * @deprecated will be removed in 1.0
  * @see chassis_new()
@@ -120,7 +121,8 @@ chassis *chassis_new() {
 	chas->event_hdr_version = g_strdup(_EVENT_VERSION);
 
 	chas->shutdown_hooks = chassis_shutdown_hooks_new();
-
+       chas->user_vec = g_ptr_array_new();
+       chas->clientip_vec = g_ptr_array_new();
 	return chas;
 }
 
@@ -182,6 +184,25 @@ void chassis_free(chassis *chas) {
 
 		g_ptr_array_free(threads, TRUE);
 	}
+       
+       GPtrArray *user_vec = chas->user_vec;
+       if(user_vec) {
+              for(i = 0; i < user_vec->len; i++) {
+                     user_password *item = user_vec->pdata[i];
+                     g_free(item->user);
+                     g_free(item->pwd);
+                     g_free(item);
+              }
+              g_ptr_array_free(user_vec, TRUE);
+       }
+       GPtrArray *clientip_vec = chas->clientip_vec;
+       if(clientip_vec) {
+              for(i = 0; i < clientip_vec->len; i++) {
+                     guint *item = clientip_vec->pdata[i];
+                     g_free(item);
+              }
+              g_ptr_array_free(clientip_vec, TRUE);
+       }
 
 	if (chas->instance_name) g_free(chas->instance_name);
 

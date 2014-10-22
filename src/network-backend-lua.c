@@ -31,7 +31,9 @@
 #include "network-backend-lua.h"
 #include "network-address-lua.h"
 #include "network-mysqld-lua.h"
+#include "chassis-mainloop.h"
 
+extern chassis *srv;
 /**
  * get the info about a backend
  *
@@ -159,8 +161,16 @@ static int proxy_backends_set(lua_State *L) {
         	network_backends_add(bs, g_strdup(lua_tostring(L, -1)), BACKEND_TYPE_SY);
 	} else if (strleq(key, keysize, C("removebackend"))) {
         	network_backends_remove(bs, lua_tointeger(L, -1));
+	} else if (strleq(key, keysize, C("addpwds"))) {
+              gchar* pwds = g_strdup(lua_tostring(L, -1));
+        	network_backends_add_pwds(srv, pwds);
+              g_free(pwds);
+	} else if (strleq(key, keysize, C("removepwds"))) {
+              gchar* users = g_strdup(lua_tostring(L, -1));
+        	network_backends_remove_pwds(srv, users);
+              g_free(users);
 	} else if (strleq(key, keysize, C("saveconfig"))) {
-                network_backends_save_to_config(bs, bs->config_path);
+                network_save_config(srv);
        } else {
 		return luaL_error(L, "proxy.global.backends.%s is not writable", key);
 	}
@@ -185,3 +195,98 @@ int network_backends_lua_getmetatable(lua_State *L) {
 	return proxy_getmetatable(L, methods);
 }
 
+int proxy_user_vec_get(lua_State *L) {
+       user_password *user_pwd;
+       user_password **user_pwd_p;
+	GPtrArray *user_vec = *(GPtrArray **)luaL_checkself(L);
+	int user_ndx = luaL_checkinteger(L, 2) - 1; /** lua is indexes from 1, C from 0 */
+	
+	if (user_ndx < 0 || user_ndx >= user_vec->len ) {
+		lua_pushnil(L);
+		return 1;
+	} else {
+              user_pwd = user_vec->pdata[user_ndx];
+       }
+	user_pwd_p = lua_newuserdata(L, sizeof(user_password *)); /* the table underneath proxy.global.user_vec[ndx] */
+	*user_pwd_p = user_pwd;
+
+	network_user_password_lua_getmetatable(L);
+	lua_setmetatable(L, -2);
+
+	return 1;
+}
+
+int proxy_user_vec_len(lua_State *L) {
+       GPtrArray *user_vec = *(GPtrArray **)luaL_checkself(L);
+	lua_pushinteger(L, user_vec->len);
+
+	return 1;
+}
+
+int network_user_vec_lua_getmetatable(lua_State *L) {
+       static const struct luaL_reg methods[] = { 
+              {"__index", proxy_user_vec_get },
+              {"__len", proxy_user_vec_len },
+              {NULL, NULL },
+       };  
+
+       return proxy_getmetatable(L, methods);
+}
+
+int proxy_user_password_get(lua_State *L) {
+	user_password *user_pwd = *(user_password **)luaL_checkself(L);
+	gsize keysize = 0;
+	const char *key = luaL_checklstring(L, 2, &keysize);
+
+	if (strleq(key, keysize, C("user"))) {
+              lua_pushlstring(L, user_pwd->user, strlen(user_pwd->user));
+	} else if (strleq(key, keysize, C("pwd"))) {
+		lua_pushlstring(L, user_pwd->pwd, strlen(user_pwd->pwd));
+	} else {
+		lua_pushnil(L);
+	}
+
+	return 1;
+}
+
+int network_user_password_lua_getmetatable(lua_State *L) {
+       static const struct luaL_reg methods[] = { 
+              {"__index", proxy_user_password_get },
+              {NULL, NULL },
+       };  
+
+       return proxy_getmetatable(L, methods);
+}
+
+int proxy_clientip_get(lua_State *L) {
+	GPtrArray *clientip_vec = *(GPtrArray **)luaL_checkself(L);
+	int clientip_ndx = luaL_checkinteger(L, 2) - 1; /** lua is indexes from 1, C from 0 */
+	
+	if (clientip_ndx < 0 || clientip_ndx >= clientip_vec->len ) {
+		lua_pushnil(L);
+		return 1;
+	} else {
+              guint ip = *(guint*)clientip_vec->pdata[clientip_ndx];
+              gchar *addr = ip_to_str(ip);
+              lua_pushlstring(L, addr, strlen(addr));
+              g_free(addr);
+       }
+	return 1;
+}
+
+int proxy_clientip_vec_len(lua_State *L) {
+       GPtrArray *clientip_vec = *(GPtrArray **)luaL_checkself(L);
+	lua_pushinteger(L, clientip_vec->len);
+
+	return 1;
+}
+
+int network_clientip_vec_lua_getmetatable(lua_State *L) {
+       static const struct luaL_reg methods[] = { 
+              {"__index", proxy_clientip_get },
+              {"__len", proxy_clientip_vec_len },
+              {NULL, NULL },
+       };  
+
+       return proxy_getmetatable(L, methods);
+}

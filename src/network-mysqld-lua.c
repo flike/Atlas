@@ -175,7 +175,8 @@ int network_mysqld_con_getmetatable(lua_State *L) {
  */
 void network_mysqld_lua_setup_global(lua_State *L , chassis_private *g, chassis *chas) {
 	network_backends_t **backends_p;
-
+       GPtrArray **user_vec_p;
+       GPtrArray **clientip_vec_p;
 	int stack_top = lua_gettop(L);
 
 	/* TODO: if we share "proxy." with other plugins, this may fail to initialize it correctly, 
@@ -225,8 +226,20 @@ void network_mysqld_lua_setup_global(lua_State *L , chassis_private *g, chassis 
 	lua_setmetatable(L, -2);          /* tie the metatable to the table   (sp -= 1) */
 
 	lua_setfield(L, -2, "backends");
+       
+       user_vec_p = lua_newuserdata(L, sizeof(GPtrArray *));
+       *user_vec_p = chas->user_vec;
+       network_user_vec_lua_getmetatable(L);
+       lua_setmetatable(L, -2);
+	lua_setfield(L, -2, "user_vec");
+	
+       clientip_vec_p = lua_newuserdata(L, sizeof(GPtrArray *));
+       *clientip_vec_p = chas->clientip_vec;
+       network_clientip_vec_lua_getmetatable(L);
+       lua_setmetatable(L, -2);
+       lua_setfield(L, -2, "clientip_vec");
 
-	lua_pop(L, 2);  /* _G.proxy.global and _G.proxy */
+       lua_pop(L, 2);  /* _G.proxy.global and _G.proxy */
 
 	g_assert(lua_gettop(L) == stack_top);
 }
