@@ -45,6 +45,7 @@
 #include <event.h>
 
 #include "chassis-event-thread.h"
+#include "network-conn-pool-lua.h"
 
 #define C(x) x, sizeof(x) - 1
 #ifndef WIN32
@@ -125,6 +126,7 @@ chassis_event_thread_t *chassis_event_thread_new(guint index) {
 	thread->index = index;
 
 	thread->event_queue = g_async_queue_new();
+       thread->block_con_queue = g_queue_new();
 
 	return thread;
 }
@@ -147,6 +149,14 @@ void chassis_event_thread_free(chassis_event_thread_t *thread) {
 		closesocket(thread->notify_send_fd);
 	}
 
+	if (thread->con_read_fd != -1) {
+		event_del(&(thread->con_fd_event));
+		closesocket(thread->con_read_fd);
+	}
+	if (thread->con_write_fd != -1) {
+		closesocket(thread->con_write_fd);
+	}
+
 	/* we don't want to free the global event-base */
 	if (thread->thr != NULL && thread->event_base) event_base_free(thread->event_base);
 
@@ -155,6 +165,11 @@ void chassis_event_thread_free(chassis_event_thread_t *thread) {
 		network_mysqld_con_free(con);
 	}
 	g_async_queue_unref(thread->event_queue);
+
+       while(con = g_queue_pop_head(thread->block_con_queue)) {
+              network_mysqld_con_free(con);
+       }
+       g_queue_free(thread->block_con_queue);
 
 	g_free(thread);
 }
@@ -170,7 +185,7 @@ int chassis_event_threads_init_thread(chassis_event_thread_t *thread, chassis *c
 	thread->event_base = event_base_new();
 	thread->chas = chas;
 
-	int fds[2];
+	int fds[2], con_fd[2];
 	if (pipe(fds)) {
 		int err;
 		err = errno;
@@ -185,6 +200,21 @@ int chassis_event_threads_init_thread(chassis_event_thread_t *thread, chassis *c
 	event_set(&(thread->notify_fd_event), thread->notify_receive_fd, EV_READ | EV_PERSIST, chassis_event_handle, thread);
 	event_base_set(thread->event_base, &(thread->notify_fd_event));
 	event_add(&(thread->notify_fd_event), NULL);
+	
+       if (pipe(con_fd)) {
+		int err;
+		err = errno;
+		g_error("%s: evutil_socketpair() failed: %s (%d)", 
+				G_STRLOC,
+				g_strerror(err),
+				err);
+	}
+	thread->con_read_fd = con_fd[0];
+	thread->con_write_fd = con_fd[1];
+
+	event_set(&(thread->con_fd_event), thread->con_read_fd, EV_READ | EV_PERSIST, network_conn_available_handle, chas);
+	event_base_set(thread->event_base, &(thread->con_fd_event));
+	event_add(&(thread->con_fd_event), NULL);
 
 	return 0;
 }
@@ -251,4 +281,9 @@ void chassis_event_threads_start(GPtrArray *threads) {
 network_connection_pool* chassis_event_thread_pool(network_backend_t* backend) {
 	guint index = GPOINTER_TO_UINT(g_private_get(&tls_index));
 	return g_ptr_array_index(backend->pools, index);
+}
+
+guint chassis_event_thread_index_get() {
+       guint index = GPOINTER_TO_UINT(g_private_get(&tls_index));
+       return index;
 }

@@ -1012,7 +1012,7 @@ NETWORK_MYSQLD_PLUGIN_PROTO(proxy_read_query) {
 	GString *packet;
 	network_socket *recv_sock, *send_sock;
 	network_mysqld_con_lua_t *st = con->plugin_con_state;
-	int proxy_query = 1;
+	int proxy_query = 1, err = 0;
 	network_mysqld_lua_stmt_ret ret;
 
 	NETWORK_MYSQLD_CON_TRACK_TIME(con, "proxy::ready_query::enter");
@@ -1135,7 +1135,7 @@ NETWORK_MYSQLD_PLUGIN_PROTO(proxy_read_query) {
                                    if (type == COM_QUERY || type == COM_STMT_PREPARE) {
                                           backend_ndx = rw_split(tokens, con);
                                           con->backend_ndx = backend_ndx;
-                                          send_sock = network_connection_pool_lua_swap(con, backend_ndx);
+                                          send_sock = network_connection_pool_lua_swap(con, backend_ndx, &err);
                                           if (send_sock == NULL) {
                                                  network_backend_t *backend = network_backends_get(con->srv->priv->backends, backend_ndx);
                                                  network_backend_t *master = network_get_backend_by_type(con->srv->priv->backends, BACKEND_TYPE_RW);
@@ -1146,14 +1146,14 @@ NETWORK_MYSQLD_PLUGIN_PROTO(proxy_read_query) {
                                    } else if (type == COM_INIT_DB || type == COM_SET_OPTION || type == COM_FIELD_LIST) {
                                           backend_ndx = wrr_ro(con);
                                           con->backend_ndx = backend_ndx;
-                                          send_sock = network_connection_pool_lua_swap(con, backend_ndx);
+                                          send_sock = network_connection_pool_lua_swap(con, backend_ndx, &err);
                                    }
                             }
 
                             if (send_sock == NULL) {
                                    backend_ndx = idle_rw(con);
                                    con->backend_ndx = backend_ndx;
-                                   send_sock = network_connection_pool_lua_swap(con, backend_ndx);
+                                   send_sock = network_connection_pool_lua_swap(con, backend_ndx, &err);
                             }
                             con->server = send_sock;
 			}
@@ -1175,9 +1175,17 @@ NETWORK_MYSQLD_PLUGIN_PROTO(proxy_read_query) {
 	 */
 	if (ret != PROXY_SEND_RESULT &&
 	    con->server == NULL) {
-		g_critical("%s.%d: I have no server backend, closing connection", __FILE__, __LINE__);
-              con->backend_ndx = -1;
-		return NETWORK_SOCKET_ERROR;
+              if(err == 0) {
+                     g_critical("%s.%d: I have no server backend, closing connection", __FILE__, __LINE__);
+                     con->backend_ndx = -1;
+                     return NETWORK_SOCKET_ERROR;
+              } else if(err == -1) {
+                     g_message("%s: the connection count reach the max_connections(%d)", G_STRLOC, con->config->max_connections);
+                     guint thread_id = chassis_event_thread_index_get();
+                     chassis_event_thread_t *thread = g_ptr_array_index(srv->threads, thread_id);
+                     g_queue_push_tail(thread->block_con_queue, con);
+                     return NETWORK_SOCKET_WAIT_FOR_EVENT;
+              }
 	}
 	
 	switch (ret) {
@@ -1221,8 +1229,8 @@ NETWORK_MYSQLD_PLUGIN_PROTO(proxy_read_query) {
 		break; }
 	case PROXY_SEND_INJECTION: {
 		injection *inj;
-
-		inj = g_queue_peek_head(st->injected.queries);
+		
+              inj = g_queue_peek_head(st->injected.queries);
 		con->resultset_is_needed = inj->resultset_is_needed; /* let the lua-layer decide if we want to buffer the result or not */
 
 		send_sock = con->server;

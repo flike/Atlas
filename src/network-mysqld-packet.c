@@ -537,15 +537,15 @@ int network_mysqld_con_command_states_init(network_mysqld_con *con, network_pack
 	case COM_QUERY:
 	case COM_PROCESS_INFO:
 	case COM_STMT_EXECUTE:
-		con->parse.data = network_mysqld_com_query_result_new();
+              con->parse.data = network_mysqld_com_query_result_new();
 		con->parse.data_free = (GDestroyNotify)network_mysqld_com_query_result_free;
 		break;
 	case COM_STMT_PREPARE:
-		con->parse.data = network_mysqld_com_stmt_prepare_result_new();
+              con->parse.data = network_mysqld_com_stmt_prepare_result_new();
 		con->parse.data_free = (GDestroyNotify)network_mysqld_com_stmt_prepare_result_free;
 		break;
 	case COM_INIT_DB:
-		con->parse.data = network_mysqld_com_init_db_result_new();
+              con->parse.data = network_mysqld_com_init_db_result_new();
 		con->parse.data_free = (GDestroyNotify)network_mysqld_com_init_db_result_free;
 
 		network_mysqld_com_init_db_result_track_state(packet, con->parse.data);

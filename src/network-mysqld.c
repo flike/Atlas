@@ -907,16 +907,16 @@ int reroute_failed_sql(network_mysqld_con *con) {
        
        if(con->backend_ndx > 0) {
               ndx = wrr_ro(con);
-              send_sock = network_connection_pool_lua_swap(con, ndx);
+              send_sock = network_connection_pool_lua_swap(con, ndx, NULL);
        }
        if(send_sock == NULL && con->backend_ndx > 0) {
               ndx = idle_rw(con);
-              send_sock = network_connection_pool_lua_swap(con, ndx);
+              send_sock = network_connection_pool_lua_swap(con, ndx, NULL);
        }
        if(send_sock == NULL) {
               if(-1 != change_standby_to_master(con->srv->priv->backends)) {
                      ndx = idle_rw(con);
-                     send_sock = network_connection_pool_lua_swap(con, ndx);
+                     send_sock = network_connection_pool_lua_swap(con, ndx, NULL);
               }
        }
        network_socket_free(con->server);
@@ -1484,6 +1484,8 @@ void network_mysqld_con_handle(int event_fd, short events, void *user_data) {
 			switch (plugin_call(srv, con, con->state)) {
 			case NETWORK_SOCKET_SUCCESS:
 				break;
+                     case NETWORK_SOCKET_WAIT_FOR_EVENT: /*the connection count reached to the max-connections, exit the loop*/
+                            return;
 			default:
 				g_critical("%s.%d: plugin_call(CON_STATE_READ_QUERY) failed", __FILE__, __LINE__);
 

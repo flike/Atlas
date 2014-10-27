@@ -97,6 +97,7 @@ static void network_mysqld_con_idle_handle(int event_fd, short events, void *use
 int network_connection_pool_lua_add_connection(network_mysqld_con *con) {
 	network_connection_pool_entry *pool_entry = NULL;
 	network_mysqld_con_lua_t *st = con->plugin_con_state;
+       guint thread_id;
 
 	/* con-server is already disconnected, got out */
 	if (!con->server) return 0;
@@ -130,10 +131,14 @@ int network_connection_pool_lua_add_connection(network_mysqld_con *con) {
 	g_atomic_int_dec_and_test(&(st->backend->connected_clients));
 	st->backend = NULL;
 	st->backend_ndx = -1;
-	
 	con->server = NULL;
-
-	return 0;
+       thread_id = chassis_event_thread_index_get();
+       chassis_event_thread_t *thread = g_ptr_array_index(con->srv->threads, thread_id);
+       if(thread->block_con_queue->length) {
+              if (write(thread->con_write_fd, "", 1) != 1) g_message("%s:pipes - write error: %s", G_STRLOC, g_strerror(errno));
+       }
+	
+       return 0;
 }
 
 network_socket *self_connect(network_mysqld_con *con, network_backend_t *backend) {
@@ -282,7 +287,7 @@ network_socket *self_connect(network_mysqld_con *con, network_backend_t *backend
  * @return NULL if swapping failed
  *         the new backend on success
  */
-network_socket* network_connection_pool_lua_swap(network_mysqld_con *con, int backend_ndx) {
+network_socket* network_connection_pool_lua_swap(network_mysqld_con *con, int backend_ndx, int *err) {
 	network_backend_t *backend = NULL;
 	network_socket *send_sock;
 	network_mysqld_con_lua_t *st = con->plugin_con_state;
@@ -319,6 +324,7 @@ network_socket* network_connection_pool_lua_swap(network_mysqld_con *con, int ba
                      }
               } else {
                      st->backend_ndx = -1;
+                     *err = -1;
                      return NULL;
               }
 	}
@@ -336,6 +342,40 @@ network_socket* network_connection_pool_lua_swap(network_mysqld_con *con, int ba
 	st->backend_ndx = backend_ndx;
 
 	return send_sock;
+}
+
+void network_conn_available_handle(int G_GNUC_UNUSED event_fd, short G_GNUC_UNUSED events, void* user_data) {
+       int err = 0;
+       char ping[1];
+       network_mysqld_con_lua_t *st;
+       injection *inj;
+       GString *packet;
+
+       chassis *chas = user_data;
+       guint index = chassis_event_thread_index_get();
+       chassis_event_thread_t *thread = g_ptr_array_index(chas->threads, index);
+       if (read(thread->con_read_fd, ping, 1) != 1) g_message("%s:pipes - read error,error message:%s", G_STRLOC, g_strerror(errno));
+       
+       network_mysqld_con *con = g_queue_pop_head(thread->block_con_queue);
+       if(con == NULL) return;
+       network_socket* sock = network_connection_pool_lua_swap(con, con->backend_ndx, &err);
+       if(sock == NULL) {
+              g_queue_push_tail(thread->block_con_queue, con);
+              return;
+       }
+       con->server = sock;
+       st = con->plugin_con_state;
+       inj = g_queue_peek_head(st->injected.queries);
+       con->resultset_is_needed = inj->resultset_is_needed; /* let the lua-layer decide if we want to buffer the result or not */
+
+       network_mysqld_queue_reset(con->server);
+       network_mysqld_queue_append(con->server, con->server->send_queue, S(inj->query));
+
+       while ((packet = g_queue_pop_head(con->client->recv_queue->chunks))) g_string_free(packet, TRUE);
+       con->state = CON_STATE_SEND_QUERY;
+       network_mysqld_con_reset_command_response_state(con);
+
+       network_mysqld_con_handle(-1, 0, con);
 }
 
 int wrr_ro(network_mysqld_con *con) {

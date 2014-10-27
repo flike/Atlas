@@ -43,7 +43,11 @@ typedef struct {
 	int notify_receive_fd;
 	int notify_send_fd;
 
+       int con_read_fd;
+       int con_write_fd;
+
 	struct event notify_fd_event;
+	struct event con_fd_event;
 
 	GThread *thr;
 
@@ -52,6 +56,7 @@ typedef struct {
 	guint index;
 
 	GAsyncQueue *event_queue;
+       GQueue *block_con_queue;
 } chassis_event_thread_t;
 
 CHASSIS_API chassis_event_thread_t *chassis_event_thread_new();
@@ -64,5 +69,6 @@ CHASSIS_API int chassis_event_threads_init_thread(chassis_event_thread_t *thread
 CHASSIS_API void chassis_event_threads_start(GPtrArray *threads);
 
 CHASSIS_API network_connection_pool* chassis_event_thread_pool(network_backend_t* backend);
+CHASSIS_API guint chassis_event_thread_index_get();
 
 #endif
