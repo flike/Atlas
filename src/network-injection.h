@@ -66,6 +66,7 @@ typedef struct {
 	guint64      bytes;
 
 	gboolean     resultset_is_needed;       /**< flag to announce if we have to buffer the result for later processing */
+       int resultset_is_large;
 } injection;
 
 /**

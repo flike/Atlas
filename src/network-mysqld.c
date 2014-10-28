@@ -1601,13 +1601,19 @@ retry:
 
 				switch (plugin_call(srv, con, con->state)) {
 				case NETWORK_SOCKET_SUCCESS:
-					/* if we don't need the resultset, forward it to the client */
-					if (!con->resultset_is_finished && !con->resultset_is_needed) {
-						/* check how much data we have in the queue waiting, no need to try to send 5 bytes */
-						if (con->client->send_queue->len > 64 * 1024) {
-							con->state = CON_STATE_SEND_QUERY_RESULT;
-						}
-					}
+                                   /* if we don't need the resultset, forward it to the client */
+                                   if (!con->resultset_is_finished && !con->resultset_is_needed) {
+                                          /* check how much data we have in the queue waiting, no need to try to send 5 bytes */
+                                          if (con->client->send_queue->len > 64 * 1024) {
+                                                 con->state = CON_STATE_SEND_QUERY_RESULT;
+                                                 network_mysqld_con_lua_t *nt = con->plugin_con_state;
+                                                 injection *inj = g_queue_peek_head(nt->injected.queries);
+                                                 if(inj->resultset_is_large == 0) {
+                                                        g_message("large resultset sql:%s", inj->query->str+1);
+                                                        inj->resultset_is_large = 1;
+                                                 }
+                                          }
+                                   }
 					break;
 				case NETWORK_SOCKET_ERROR:
 					/* something nasty happend, let's close the connection */
