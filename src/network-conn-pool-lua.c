@@ -379,7 +379,7 @@ void network_conn_available_handle(int G_GNUC_UNUSED event_fd, short G_GNUC_UNUS
 }
 
 int wrr_ro(network_mysqld_con *con) {
-       guint i;
+       guint i, j;
        network_backends_t* backends = con->srv->priv->backends;
        g_wrr_poll* rwsplit = backends->global_wrr;
        guint ndx_num = network_backends_count(backends);
@@ -398,7 +398,7 @@ int wrr_ro(network_mysqld_con *con) {
        }    
 
        guint max_weight = rwsplit->max_weight;
-       guint cur_weight = rwsplit->cur_weight;
+       gint cur_weight = rwsplit->cur_weight;
        guint next_ndx   = rwsplit->next_ndx;
 
        // get backend index by slave wrr
@@ -410,13 +410,25 @@ int wrr_ro(network_mysqld_con *con) {
               network_connection_pool* pool = chassis_event_thread_pool(backend);
               if (pool == NULL) goto next;
 
-              if (backend->type == BACKEND_TYPE_RO && backend->weight >= cur_weight && backend->state == BACKEND_STATE_UP) ndx = next_ndx;
+              if (backend->type == BACKEND_TYPE_RO && backend->weight >= cur_weight) {
+                     if(backend->state == BACKEND_STATE_UP) {
+                            ndx = next_ndx;
+                     }else {
+                            for(j = 0; j < ndx_num; ++j) {
+                                   network_backend_t* b = network_backends_get(backends, j);
+                                   if(b == NULL) continue;
+                                   network_connection_pool* p = chassis_event_thread_pool(b);
+                                   if(p == NULL) continue;
+                                   if(b->type == BACKEND_TYPE_RO && b->state == BACKEND_STATE_UP) ndx = j;
+                            }
+                     }
+              }
 next:
               if (next_ndx >= ndx_num - 1) { 
                      --cur_weight;
                      next_ndx = 0; 
 
-                     if (cur_weight == 0) cur_weight = max_weight;
+                     if (cur_weight <= 0) cur_weight = max_weight;
               } else {
                      ++next_ndx;
               }    
