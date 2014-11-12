@@ -907,16 +907,16 @@ int reroute_failed_sql(network_mysqld_con *con) {
        
        if(con->backend_ndx > 0) {
               ndx = wrr_ro(con);
-              send_sock = network_connection_pool_lua_swap(con, ndx, NULL);
+              send_sock = network_connection_pool_lua_swap(con, ndx, 0, NULL);
        }
        if(send_sock == NULL && con->backend_ndx > 0) {
               ndx = idle_rw(con);
-              send_sock = network_connection_pool_lua_swap(con, ndx, NULL);
+              send_sock = network_connection_pool_lua_swap(con, ndx, 0, NULL);
        }
        if(send_sock == NULL) {
               if(-1 != change_standby_to_master(con->srv->priv->backends)) {
                      ndx = idle_rw(con);
-                     send_sock = network_connection_pool_lua_swap(con, ndx, NULL);
+                     send_sock = network_connection_pool_lua_swap(con, ndx, 0, NULL);
               }
        }
        network_socket_free(con->server);

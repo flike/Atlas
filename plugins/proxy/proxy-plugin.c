@@ -1,4 +1,5 @@
 /* $%BEGINLICENSE%$
+                            
  Copyright (c) 2007, 2010, Oracle and/or its affiliates. All rights reserved.
 
  This program is free software; you can redistribute it and/or
@@ -566,15 +567,15 @@ NETWORK_MYSQLD_PLUGIN_PROTO(proxy_read_auth_result) {
 	/**
 	 * copy the 
 	 * - default-db, 
-     * - charset,
+        * - charset,
 	 * - username, 
 	 * - scrambed_password
 	 *
 	 * to the server-side 
 	 */
-    g_string_assign_len(recv_sock->charset_client, S(send_sock->charset_client));
-    g_string_assign_len(recv_sock->charset_connection, S(send_sock->charset_connection));
-    g_string_assign_len(recv_sock->charset_results, S(send_sock->charset_results));
+       g_string_assign_len(recv_sock->charset_client, S(send_sock->charset_client));
+       g_string_assign_len(recv_sock->charset_connection, S(send_sock->charset_connection));
+       g_string_assign_len(recv_sock->charset_results, S(send_sock->charset_results));
 	g_string_assign_len(recv_sock->default_db, S(send_sock->default_db));
 
 	if (con->server->response) {
@@ -583,41 +584,9 @@ NETWORK_MYSQLD_PLUGIN_PROTO(proxy_read_auth_result) {
 		con->server->response = NULL;
 	}
 	con->server->response = network_mysqld_auth_response_copy(con->client->response);
-
-	/**
-	 * recv_sock still points to the old backend that
-	 * we received the packet from. 
-	 *
-	 * backend_ndx = 0 might have reset con->server
-	 */
-/*
-	switch (proxy_lua_read_auth_result(con)) {
-	case PROXY_SEND_RESULT:
-		 // we already have content in the send-sock 
-		 // chunk->packet is not forwarded, free it
-
-		g_string_free(packet, TRUE);
-		
-		break;
-	case PROXY_NO_DECISION:
-		network_mysqld_queue_append_raw(
-				send_sock,
-				send_sock->send_queue,
-				packet);
-
-		break;
-	default:
-		g_error("%s.%d: ... ", __FILE__, __LINE__);
-		break;
-	}
-*/
-	//g_mutex_lock(&mutex);
 	if (packet->str[NET_HEADER_SIZE] == MYSQLD_PACKET_OK) {
-		network_connection_pool_lua_add_connection(con);
-	}/*else {
-		network_backend_t* backend = ((network_mysqld_con_lua_t*)(con->plugin_con_state))->backend;
-		if (backend->state != BACKEND_STATE_OFFLINE) backend->state = BACKEND_STATE_DOWN;
-	}*/
+		network_connection_pool_lua_add_connection(con, 0);
+	}
 	network_mysqld_queue_append_raw(
 			send_sock,
 			send_sock->send_queue,
@@ -799,12 +768,12 @@ void modify_charset(GPtrArray* tokens, network_mysqld_con* con) {
 	g_string_free(empty_charset, TRUE);
 }
 
-void check_flags(GPtrArray* tokens, network_mysqld_con* con) {
-	con->is_in_select_calc_found_rows = FALSE;
-
+void check_flags(GPtrArray* tokens, network_mysqld_con* con, int* need_keep_conn, int* is_write_sql) {
+	guint i;
+       con->is_in_select_calc_found_rows = FALSE;
 	sql_token** ts = (sql_token**)(tokens->pdata);
 	guint len = tokens->len;
-
+       guint64 now;
 	if (len > 2) {
 		if (ts[1]->token_id == TK_SQL_SELECT && strcasecmp(ts[2]->text->str, "GET_LOCK") == 0) {
 			gchar* key = ts[4]->text->str;
@@ -823,9 +792,11 @@ void check_flags(GPtrArray* tokens, network_mysqld_con* con) {
 				}
 			}
 		}
+              if(ts[1]->token_id == TK_SQL_SELECT || ts[1]->token_id == TK_SQL_SET || ts[1]->token_id == TK_SQL_USE || ts[1]-> token_id == TK_SQL_SHOW || ts[1]->token_id == TK_SQL_DESC || ts[1]->token_id == TK_SQL_EXPLAIN)
+                     *is_write_sql = 0;
+              else
+                     *is_write_sql = 1;
 	}
-
-	guint i;
 	for (i = 1; i < len; ++i) {
 		sql_token* token = ts[i];
 		if (ts[i]->token_id == TK_SQL_SQL_CALC_FOUND_ROWS) {
@@ -833,6 +804,19 @@ void check_flags(GPtrArray* tokens, network_mysqld_con* con) {
 			break;
 		}
 	}
+       if(con->is_in_transaction || con->is_not_autocommit || con->is_in_select_calc_found_rows || con->is_lock_table || g_hash_table_size(con->locks) != 0) {
+              *need_keep_conn = 0;
+              *is_write_sql = 0;
+              return;
+       }
+
+       now = my_timer_microseconds();
+       if(now > con->write_sql_time + con->config->connection_expire_time * 1000) { 
+              *need_keep_conn = 0;
+       }else { 
+              *need_keep_conn = 1;
+       }
+       if(*is_write_sql) con->write_sql_time = now;
 }
 
 gboolean is_in_blacklist(network_mysqld_con* con, GString* packets) {
@@ -1012,7 +996,7 @@ NETWORK_MYSQLD_PLUGIN_PROTO(proxy_read_query) {
 	GString *packet;
 	network_socket *recv_sock, *send_sock;
 	network_mysqld_con_lua_t *st = con->plugin_con_state;
-	int proxy_query = 1, err = 0;
+	int proxy_query = 1, err = 0, need_keep_conn = 0, is_write_sql = 0;
 	network_mysqld_lua_stmt_ret ret;
 
 	NETWORK_MYSQLD_CON_TRACK_TIME(con, "proxy::ready_query::enter");
@@ -1038,8 +1022,9 @@ NETWORK_MYSQLD_PLUGIN_PROTO(proxy_read_query) {
 	} else { 
 		GPtrArray *tokens = sql_tokens_new();
 		sql_tokenizer(tokens, packets->str, packets->len);
-        
-	    	if (type == COM_QUERY && con->config->reg_array->len && is_in_blacklist(con, packets)) {	
+              check_flags(tokens, con, &need_keep_conn, &is_write_sql);
+	    	
+              if (type == COM_QUERY && con->config->reg_array->len && is_in_blacklist(con, packets)) {	
             		g_string_free(packets, TRUE);
 			network_mysqld_con_send_error_full(con->client, C("Proxy Warning - Syntax Forbidden"), ER_UNKNOWN_ERROR, "07000");
 			ret = PROXY_SEND_RESULT;
@@ -1126,16 +1111,14 @@ NETWORK_MYSQLD_PLUGIN_PROTO(proxy_read_query) {
 				}
             }
 
-			check_flags(tokens, con);
-
 			if (con->server == NULL) {
 				int backend_ndx = -1;
 
-                            if (!con->is_in_transaction && !con->is_not_autocommit && !con->is_lock_table && g_hash_table_size(con->locks) == 0) {
+                            if (!con->is_in_transaction && !con->is_not_autocommit && !con->is_lock_table && g_hash_table_size(con->locks) == 0 && need_keep_conn == 0) {
                                    if (type == COM_QUERY || type == COM_STMT_PREPARE) {
                                           backend_ndx = rw_split(tokens, con);
                                           con->backend_ndx = backend_ndx;
-                                          send_sock = network_connection_pool_lua_swap(con, backend_ndx, &err);
+                                          send_sock = network_connection_pool_lua_swap(con, backend_ndx, need_keep_conn, &err);
                                           if (send_sock == NULL) {
                                                  network_backend_t *backend = network_backends_get(con->srv->priv->backends, backend_ndx);
                                                  network_backend_t *master = network_get_backend_by_type(con->srv->priv->backends, BACKEND_TYPE_RW);
@@ -1146,14 +1129,14 @@ NETWORK_MYSQLD_PLUGIN_PROTO(proxy_read_query) {
                                    } else if (type == COM_INIT_DB || type == COM_SET_OPTION || type == COM_FIELD_LIST) {
                                           backend_ndx = wrr_ro(con);
                                           con->backend_ndx = backend_ndx;
-                                          send_sock = network_connection_pool_lua_swap(con, backend_ndx, &err);
+                                          send_sock = network_connection_pool_lua_swap(con, backend_ndx, need_keep_conn, &err);
                                    }
                             }
 
                             if (send_sock == NULL) {
                                    backend_ndx = idle_rw(con);
                                    con->backend_ndx = backend_ndx;
-                                   send_sock = network_connection_pool_lua_swap(con, backend_ndx, &err);
+                                   send_sock = network_connection_pool_lua_swap(con, backend_ndx, need_keep_conn, &err);
                             }
                             con->server = send_sock;
 			}
@@ -1696,7 +1679,11 @@ NETWORK_MYSQLD_PLUGIN_PROTO(proxy_read_query_result) {
 				gboolean have_last_insert_id = inj->qstat.insert_id > 0;
 
 				if (!con->is_in_transaction && !con->is_not_autocommit && !con->is_in_select_calc_found_rows && !have_last_insert_id && !con->is_lock_table && g_hash_table_size(con->locks) == 0) {
-                                   network_connection_pool_lua_add_connection(con);
+                                   guint64 now = my_timer_microseconds();
+                                   if(now > con->write_sql_time + con->config->connection_expire_time * 1000)
+                                          network_connection_pool_lua_add_connection(con, 0);
+                                   else 
+                                          network_connection_pool_lua_add_connection(con, 1);
                                    con->backend_ndx = -1;
                             }
 
@@ -1822,41 +1809,9 @@ NETWORK_MYSQLD_PLUGIN_PROTO(proxy_init) {
 NETWORK_MYSQLD_PLUGIN_PROTO(proxy_disconnect_client) {
 	network_mysqld_con_lua_t *st = con->plugin_con_state;
 	lua_scope  *sc = con->srv->priv->sc;
-//	gboolean use_pooled_connection = FALSE;
 
 	if (st == NULL) return NETWORK_SOCKET_SUCCESS;
 	
-	/**
-	 * let the lua-level decide if we want to keep the connection in the pool
-	 */
-/*
-	switch (proxy_lua_disconnect_client(con)) {
-	case PROXY_NO_DECISION:
-		// just go on
-
-		break;
-	case PROXY_IGNORE_RESULT:
-		break;
-	default:
-		g_error("%s.%d: ... ", __FILE__, __LINE__);
-		break;
-	}
-*/
-	/**
-	 * check if one of the backends has to many open connections
-	 */
-
-//	if (use_pooled_connection &&
-//	    con->state == CON_STATE_CLOSE_CLIENT) {
-/*
-	if (con->state == CON_STATE_CLOSE_CLIENT) {
-		if (con->server && con->server->is_authed) {
-			network_connection_pool_lua_add_connection(con);
-		}
-	} else if (st->backend) {
-		st->backend->connected_clients--;
-	}
-*/
 #ifdef HAVE_LUA_H
 	/* remove this cached script from registry */
 	if (st->L_ref > 0) {
@@ -2173,6 +2128,7 @@ static GOptionEntry * network_mysqld_proxy_plugin_get_options(chassis_plugin_con
               { "connect_times", 0, 0, G_OPTION_ARG_INT, NULL, "the times of checking the backends", NULL},
 		{ "forbidden-sql", 0, 0, G_OPTION_ARG_STRING_ARRAY, NULL, "forbidden sql", NULL },
               { "max-connections", 0, 0, G_OPTION_ARG_INT, NULL, "the max connections of one DB (default:0)", NULL },
+              { "connection-expire-time", 0, 0, G_OPTION_ARG_INT, NULL, "the expire time of keeping connection(default:0)", NULL },
 		{ NULL,                       0, 0, G_OPTION_ARG_NONE,   NULL, NULL, NULL }
 	};
 
@@ -2199,6 +2155,7 @@ static GOptionEntry * network_mysqld_proxy_plugin_get_options(chassis_plugin_con
        config_entries[i++].arg_data = &(config->connect_times);
        config_entries[i++].arg_data = &(config->fsql);
        config_entries[i++].arg_data = &(config->max_connections);
+       config_entries[i++].arg_data = &(config->connection_expire_time);
 	return config_entries;
 }
 

@@ -94,7 +94,7 @@ static void network_mysqld_con_idle_handle(int event_fd, short events, void *use
  * move the con->server into connection pool and disconnect the 
  * proxy from its backend 
  */
-int network_connection_pool_lua_add_connection(network_mysqld_con *con) {
+int network_connection_pool_lua_add_connection(network_mysqld_con *con, int is_write_sql) {
 	network_connection_pool_entry *pool_entry = NULL;
 	network_mysqld_con_lua_t *st = con->plugin_con_state;
        guint thread_id;
@@ -119,15 +119,19 @@ int network_connection_pool_lua_add_connection(network_mysqld_con *con) {
 	con->server->is_authed = 1;
 
 	/* insert the server socket into the connection pool */
-	network_connection_pool* pool = chassis_event_thread_pool(st->backend);
-	pool_entry = network_connection_pool_add(pool, con->server);
+       if(is_write_sql == 0) {
+              network_connection_pool* pool = chassis_event_thread_pool(st->backend);
+              pool_entry = network_connection_pool_add(pool, con->server);
+       }else {
+              network_connection_pool* pool = chassis_event_thread_secondpool(st->backend);
+              pool_entry = network_connection_pool_time_add(pool, con->server, con);
+       }
 
 	if (pool_entry) {
 		event_set(&(con->server->event), con->server->fd, EV_READ, network_mysqld_con_idle_handle, pool_entry);
 		chassis_event_add_local(con->srv, &(con->server->event)); /* add a event, but stay in the same thread */
 	}
 	
-//	st->backend->connected_clients--;
 	g_atomic_int_dec_and_test(&(st->backend->connected_clients));
 	st->backend = NULL;
 	st->backend_ndx = -1;
@@ -287,12 +291,12 @@ network_socket *self_connect(network_mysqld_con *con, network_backend_t *backend
  * @return NULL if swapping failed
  *         the new backend on success
  */
-network_socket* network_connection_pool_lua_swap(network_mysqld_con *con, int backend_ndx, int *err) {
+network_socket* network_connection_pool_lua_swap(network_mysqld_con *con, int backend_ndx, int need_keep_conn, int *err) {
 	network_backend_t *backend = NULL;
 	network_socket *send_sock;
+       network_connection_pool *pool, *second_pool;
 	network_mysqld_con_lua_t *st = con->plugin_con_state;
 	chassis_private *g = con->srv->priv;
-//	GString empty_username = { "", 0, 0 };
 
 	/*
 	 * we can only change to another backend if the backend is already
@@ -312,8 +316,19 @@ network_socket* network_connection_pool_lua_swap(network_mysqld_con *con, int ba
 #ifdef DEBUG_CONN_POOL
 	g_debug("%s: (swap) check if we have a connection for this user in the pool '%s'", G_STRLOC, con->client->response ? con->client->response->username->str: "empty_user");
 #endif
-	network_connection_pool* pool = chassis_event_thread_pool(backend);
-	if (NULL == (send_sock = network_connection_pool_get(pool))) {
+       if(need_keep_conn == 0) {
+              pool = chassis_event_thread_pool(backend);
+              send_sock = network_connection_pool_get(pool);
+              if(send_sock == NULL) {
+                     second_pool = chassis_event_thread_secondpool(backend);
+                     send_sock = network_expiretime_connection_pool_get(second_pool, con);
+              }
+       }else {
+              second_pool = chassis_event_thread_secondpool(backend);
+              send_sock = network_connection_secondpool_get(second_pool, con);
+              if(send_sock == NULL) g_message("%s:the connection need keep, but it's not in the pool now.", G_STRLOC);
+       }
+	if (NULL == send_sock ) {
 		/**
 		 * no connections in the pool
 		 */
@@ -333,11 +348,9 @@ network_socket* network_connection_pool_lua_swap(network_mysqld_con *con, int ba
 #ifdef DEBUG_CONN_POOL
 	g_debug("%s: (swap) added the previous connection to the pool", G_STRLOC);
 #endif
-//	network_connection_pool_lua_add_connection(con);
 
 	/* connect to the new backend */
 	st->backend = backend;
-//	st->backend->connected_clients++;
 	g_atomic_int_inc(&(st->backend->connected_clients));
 	st->backend_ndx = backend_ndx;
 
@@ -358,7 +371,7 @@ void network_conn_available_handle(int G_GNUC_UNUSED event_fd, short G_GNUC_UNUS
        
        network_mysqld_con *con = g_queue_pop_head(thread->block_con_queue);
        if(con == NULL) return;
-       network_socket* sock = network_connection_pool_lua_swap(con, con->backend_ndx, &err);
+       network_socket* sock = network_connection_pool_lua_swap(con, con->backend_ndx, 0, &err);
        if(sock == NULL) {
               g_queue_push_tail(thread->block_con_queue, con);
               return;

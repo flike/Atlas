@@ -39,15 +39,20 @@ network_backend_t *network_backend_new(guint event_thread_count) {
 
 	b = g_new0(network_backend_t, 1);
 
-//	b->pool = network_connection_pool_new();
 	b->pools = g_ptr_array_new();
+	b->second_pools = g_ptr_array_new();
 	guint i;
 	for (i = 0; i <= event_thread_count; ++i) {
 		network_connection_pool* pool = network_connection_pool_new();
 		g_ptr_array_add(b->pools, pool);
 	}
 
-	b->uuid = g_string_new(NULL);
+	for (i = 0; i <= event_thread_count; ++i) {
+		network_connection_pool* pool = network_connection_pool_new();
+		g_ptr_array_add(b->second_pools, pool);
+	}
+	
+       b->uuid = g_string_new(NULL);
 	b->addr = network_address_new();
 
 	return b;
@@ -62,6 +67,12 @@ void network_backend_free(network_backend_t *b) {
 		network_connection_pool_free(pool);
 	}
 	g_ptr_array_free(b->pools, TRUE);
+	
+       for (i = 0; i < b->second_pools->len; ++i) {
+		network_connection_pool* pool = g_ptr_array_index(b->second_pools, i);
+		network_connection_pool_free(pool);
+	}
+	g_ptr_array_free(b->second_pools, TRUE);
 
 	if (b->addr)     network_address_free(b->addr);
 	if (b->uuid)     g_string_free(b->uuid, TRUE);

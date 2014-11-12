@@ -25,6 +25,9 @@
 #include "network-mysqld-packet.h"
 #include "glib-ext.h"
 #include "sys-pedantic.h"
+#include "chassis-timings.h"
+#include "network-mysqld.h"
+#include "network-conn-pool-lua.h"
 
 /** @file
  * connection pools
@@ -122,6 +125,66 @@ network_socket *network_connection_pool_get(network_connection_pool *pool) {
 	return sock;
 }
 
+network_socket *network_expiretime_connection_pool_get(network_connection_pool *pool, void* con) {
+	network_connection_pool_entry *entry = NULL;
+       int i, len;
+       guint64 now;
+	network_mysqld_con* connection = (network_mysqld_con*)con;
+       chassis_plugin_config *config = connection->config;
+       if(pool->length > 0) {
+              len = pool->length;
+		for(i = 0; i < len; i++) {
+                     entry = g_queue_peek_nth(pool, i);
+                     g_assert(entry);
+                     now = my_timer_microseconds();
+                     if(now > entry->last_write_time + config->connection_expire_time * 1000) {
+                            entry = g_queue_pop_nth(pool, i);
+                            break;
+                     }
+              }
+              if(i == len) entry = NULL;
+	}
+
+	/**
+	 * if we know this use, return a authed connection 
+	 */
+	if (!entry) return NULL;
+	network_socket *sock = entry->sock;
+	network_connection_pool_entry_free(entry, FALSE);
+	
+       /* remove the idle handler from the socket */	
+	event_del(&(sock->event));
+	return sock;
+}
+
+network_socket *network_connection_secondpool_get(network_connection_pool *pool, void* con) {
+	network_connection_pool_entry *entry = NULL;
+       int i, len;
+	
+       if(pool->length > 0) {
+              len = pool->length;
+		for(i = 0; i < len; i++) {
+                     entry = g_queue_peek_nth(pool, i);
+                     if(entry->con == con) {
+                            entry = g_queue_pop_nth(pool, i);
+                            break;
+                     }
+              }
+              if(i == len) entry = NULL;
+	}
+
+	/**
+	 * if we know this use, return a authed connection 
+	 */
+	if (!entry) return NULL;
+	network_socket *sock = entry->sock;
+	network_connection_pool_entry_free(entry, FALSE);
+	
+       /* remove the idle handler from the socket */	
+	event_del(&(sock->event));
+	return sock;
+}
+
 /**
  * add a connection to the connection pool
  *
@@ -138,6 +201,27 @@ network_connection_pool_entry *network_connection_pool_add(network_connection_po
 		}
 	}
 
+	network_socket_free(sock);
+	return NULL;
+}
+
+/**
+ * add a connection to the connection pool ,record time and con.
+ *
+ */
+network_connection_pool_entry *network_connection_pool_time_add(network_connection_pool *pool, network_socket *sock, void* con) {
+	if (pool) {
+		network_connection_pool_entry *entry = network_connection_pool_entry_new();
+              network_mysqld_con* connection = (network_mysqld_con*)con;
+		if (entry) {
+			entry->sock = sock;
+			entry->pool = pool;
+                     entry->last_write_time = connection->write_sql_time;
+                     entry->con = con;
+			g_queue_push_tail(pool, entry);
+			return entry;
+		}
+	}
 	network_socket_free(sock);
 	return NULL;
 }

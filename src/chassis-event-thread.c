@@ -283,6 +283,10 @@ network_connection_pool* chassis_event_thread_pool(network_backend_t* backend) {
 	return g_ptr_array_index(backend->pools, index);
 }
 
+network_connection_pool* chassis_event_thread_secondpool(network_backend_t* backend) {
+	guint index = GPOINTER_TO_UINT(g_private_get(&tls_index));
+	return g_ptr_array_index(backend->second_pools, index);
+}
 guint chassis_event_thread_index_get() {
        guint index = GPOINTER_TO_UINT(g_private_get(&tls_index));
        return index;

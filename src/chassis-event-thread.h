@@ -69,6 +69,7 @@ CHASSIS_API int chassis_event_threads_init_thread(chassis_event_thread_t *thread
 CHASSIS_API void chassis_event_threads_start(GPtrArray *threads);
 
 CHASSIS_API network_connection_pool* chassis_event_thread_pool(network_backend_t* backend);
+CHASSIS_API network_connection_pool* chassis_event_thread_secondpool(network_backend_t* backend);
 CHASSIS_API guint chassis_event_thread_index_get();
 
 #endif

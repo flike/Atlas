@@ -36,10 +36,15 @@ typedef struct {
 	network_socket *sock;          /** the idling socket */
 	
 	network_connection_pool *pool; /** a pointer back to the pool */
+       guint64 last_write_time;
+       void* con;
 } network_connection_pool_entry;
 
 NETWORK_API network_socket *network_connection_pool_get(network_connection_pool *pool);
+NETWORK_API network_socket *network_expiretime_connection_pool_get(network_connection_pool *pool, void* con);
+NETWORK_API network_socket *network_connection_secondpool_get(network_connection_pool *pool, void* con);
 NETWORK_API network_connection_pool_entry *network_connection_pool_add(network_connection_pool *pool, network_socket *sock);
+NETWORK_API network_connection_pool_entry *network_connection_pool_time_add(network_connection_pool *pool, network_socket *sock, void *con);
 NETWORK_API void network_connection_pool_remove(network_connection_pool *pool, network_connection_pool_entry *entry);
 
 NETWORK_API network_connection_pool *network_connection_pool_new(void);

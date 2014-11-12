@@ -55,6 +55,7 @@ typedef struct {
 
 //	network_connection_pool *pool; /**< the pool of open connections */
 	GPtrArray *pools;
+	GPtrArray *second_pools;/*the pool of open connections that keep in connection_expire_time*/
 
 	gint connected_clients; /**< number of open connections to this backend for SQF */
 

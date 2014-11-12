@@ -376,6 +376,7 @@ struct network_mysqld_con {
     	guint32 proxy_stmt_id;//generate stmt_id in proxy
     	guint32 execute_stmt_id;//stmt_id in execute state,and need to close
        gint backend_ndx; //the index of backend where con->server comes from
+       guint64 write_sql_time; 
 };
 
 
