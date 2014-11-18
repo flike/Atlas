@@ -74,7 +74,8 @@ struct chassis_plugin_config {
 
        gint sql_log_slow_ms;
        gint max_connections;
-       gint connection_expire_time;
+       gint keep_connection_time;
+       gint wait_timeout;
 };
 
 NETWORK_API int network_connection_pool_getmetatable(lua_State *L);

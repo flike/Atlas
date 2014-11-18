@@ -811,7 +811,7 @@ void check_flags(GPtrArray* tokens, network_mysqld_con* con, int* need_keep_conn
        }
 
        now = my_timer_microseconds();
-       if(now > con->write_sql_time + con->config->connection_expire_time * 1000) { 
+       if(now > con->write_sql_time + con->config->keep_connection_time * 1000) { 
               *need_keep_conn = 0;
        }else { 
               *need_keep_conn = 1;
@@ -1680,7 +1680,7 @@ NETWORK_MYSQLD_PLUGIN_PROTO(proxy_read_query_result) {
 
 				if (!con->is_in_transaction && !con->is_not_autocommit && !con->is_in_select_calc_found_rows && !have_last_insert_id && !con->is_lock_table && g_hash_table_size(con->locks) == 0) {
                                    guint64 now = my_timer_microseconds();
-                                   if(now > con->write_sql_time + con->config->connection_expire_time * 1000)
+                                   if(now > con->write_sql_time + con->config->keep_connection_time * 1000)
                                           network_connection_pool_lua_add_connection(con, 0);
                                    else 
                                           network_connection_pool_lua_add_connection(con, 1);
@@ -1992,8 +1992,6 @@ chassis_plugin_config * network_mysqld_proxy_plugin_new(void) {
        config->reg_array = g_ptr_array_new();
        config->sql_log_slow_ms = 0;
 
-	//g_mutex_init(&mutex);
-
 	return config;
 }
 
@@ -2128,7 +2126,8 @@ static GOptionEntry * network_mysqld_proxy_plugin_get_options(chassis_plugin_con
               { "connect_times", 0, 0, G_OPTION_ARG_INT, NULL, "the times of checking the backends", NULL},
 		{ "forbidden-sql", 0, 0, G_OPTION_ARG_STRING_ARRAY, NULL, "forbidden sql", NULL },
               { "max-connections", 0, 0, G_OPTION_ARG_INT, NULL, "the max connections of one DB (default:0)", NULL },
-              { "connection-expire-time", 0, 0, G_OPTION_ARG_INT, NULL, "the expire time of keeping connection(default:0)", NULL },
+              { "keep-connection-time", 0, 0, G_OPTION_ARG_INT, NULL, "the expire time of keeping connection(default:0)", NULL },
+              { "wait-timeout", 0, 0, G_OPTION_ARG_INT, NULL, "the number of seconds Atlas waits for activity on a noninteractive connection before closing it.(default:0)", NULL },
 		{ NULL,                       0, 0, G_OPTION_ARG_NONE,   NULL, NULL, NULL }
 	};
 
@@ -2155,7 +2154,8 @@ static GOptionEntry * network_mysqld_proxy_plugin_get_options(chassis_plugin_con
        config_entries[i++].arg_data = &(config->connect_times);
        config_entries[i++].arg_data = &(config->fsql);
        config_entries[i++].arg_data = &(config->max_connections);
-       config_entries[i++].arg_data = &(config->connection_expire_time);
+       config_entries[i++].arg_data = &(config->keep_connection_time);
+       config_entries[i++].arg_data = &(config->wait_timeout);
 	return config_entries;
 }
 

@@ -1031,18 +1031,6 @@ void network_mysqld_con_handle(int event_fd, short events, void *user_data) {
 		switch (con->state) {
 		case CON_STATE_ERROR:
 			/* we can't go on, close the connection */
-			/*
-			{
-				gchar *which_connection = "a";
-				if (con->server && event_fd == con->server->fd) {
-					which_connection = "server";
-				} else if (con->client && event_fd == con->client->fd) {
-					which_connection = "client";
-				}
-				g_debug("[%s]: error on %s connection (fd: %d event: %d). closing client connection.",
-						G_STRLOC, which_connection,	event_fd, events);
-			}
-			*/
 			plugin_call_cleanup(srv, con);
 			network_mysqld_con_free(con);
 
@@ -1431,6 +1419,11 @@ void network_mysqld_con_handle(int event_fd, short events, void *user_data) {
 		case CON_STATE_READ_QUERY: {
 			network_socket *recv_sock;
 			network_packet last_packet;
+                     if(events == EV_TIMEOUT && event_fd == con->client->fd) {
+                            g_message("%s:close the noninteractive connection now.", G_STRLOC);
+                            con->state = CON_STATE_ERROR;
+                            break;
+                     }
 
 			recv_sock = con->client;
 
@@ -1441,7 +1434,7 @@ void network_mysqld_con_handle(int event_fd, short events, void *user_data) {
 				case NETWORK_SOCKET_SUCCESS:
 					break;
 				case NETWORK_SOCKET_WAIT_FOR_EVENT:
-					WAIT_FOR_EVENT(con->client, EV_READ, 0);
+					WAIT_FOR_EVENT(con->client, EV_READ, con->config->wait_timeout);
 					NETWORK_MYSQLD_CON_TRACK_TIME(con, "wait_for_event::read_query");
 					return;
 				case NETWORK_SOCKET_ERROR_RETRY:

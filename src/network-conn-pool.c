@@ -137,7 +137,7 @@ network_socket *network_expiretime_connection_pool_get(network_connection_pool *
                      entry = g_queue_peek_nth(pool, i);
                      g_assert(entry);
                      now = my_timer_microseconds();
-                     if(now > entry->last_write_time + config->connection_expire_time * 1000) {
+                     if(now > entry->last_write_time + config->keep_connection_time * 1000) {
                             entry = g_queue_pop_nth(pool, i);
                             break;
                      }
