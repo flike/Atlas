@@ -397,7 +397,9 @@ int wrr_ro(network_mysqld_con *con) {
        g_wrr_poll* rwsplit = backends->global_wrr;
        guint ndx_num = network_backends_count(backends);
        if (rwsplit->next_ndx >= ndx_num)
-              rwsplit->next_ndx = 0; 
+              rwsplit->next_ndx = 0;
+       gint backend_ndx = backend_load_balance_get(con);
+       if(0 < backend_ndx) return backend_ndx;
        // set max weight if no init
        if (rwsplit->max_weight == 0) { 
               for(i = 0; i < ndx_num; ++i) {
@@ -451,6 +453,47 @@ next:
        rwsplit->cur_weight = cur_weight;
        rwsplit->next_ndx = next_ndx;
        return ndx; 
+}
+
+int backend_load_balance_get(network_mysqld_con* con) {
+       int ret = -1;
+       gint i, load_value, count, flag = 0;
+       double cv, connect_value;
+       network_backend_t* backend;
+       network_connection_pool* pool;
+       
+       if(con->config->max_connections == 0) return ret;
+       network_backends_t* backends = con->srv->priv->backends;
+       count = network_backends_count(backends);
+       load_value = con->config->max_connections;
+
+       for(i = 0; i < count; i++) {
+              backend = network_backends_get(backends, i);
+              if (backend == NULL) continue;
+              pool = chassis_event_thread_pool(backend);
+              if (pool == NULL) continue;
+              if (backend->type == BACKEND_TYPE_RO && backend->state == BACKEND_STATE_UP && backend->connected_clients >= load_value) {
+                     flag = 1;
+                     connect_value = backend->connected_clients / (double)backend->weight;
+                     break;
+              }
+       }
+       if(flag == 0) return ret;
+       for(i = 0; i < count; i++) {
+              backend = network_backends_get(backends, i);
+              if (backend == NULL) continue;
+              pool = chassis_event_thread_pool(backend);
+              if (pool == NULL) continue;
+              if (backend->type == BACKEND_TYPE_RO && backend->state == BACKEND_STATE_UP) {
+                     cv = backend->connected_clients / (double)backend->weight;
+                     if(cv <= connect_value) {
+                            ret = i;
+                            connect_value = cv;
+                     }
+              }
+       }
+       
+       return ret;
 }
 
 int idle_rw(network_mysqld_con* con) {
