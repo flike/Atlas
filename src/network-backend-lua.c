@@ -98,6 +98,7 @@ static int proxy_backend_set(lua_State *L) {
 	return 1;
 }
 
+
 int network_backend_lua_getmetatable(lua_State *L) {
 	static const struct luaL_reg methods[] = {
 		{ "__index", proxy_backend_get },
@@ -184,10 +185,53 @@ static int proxy_backends_len(lua_State *L) {
 	return 1;
 }
 
+guint ipstr_to_value(gchar *ipstr) {
+       int i;
+       guint sum = 0;
+       gchar **ip_seg = g_strsplit(ipstr, ".", 4);
+       for(i = 0; ip_seg && ip_seg[i]; i++) {
+              sum = (sum << 8) + atoi(ip_seg[i]);
+       }
+       sum = htonl(sum);
+       g_strfreev(ip_seg);
+       
+       return sum;
+}
+
+int proxy_item_exist(lua_State *L) {
+       int exist = 0;
+       gsize keysize = 0;
+       chassis_plugin *p = srv->modules->pdata[1];/*proxy plugin*/
+       chassis_plugin_config *config = p->config;
+       GHashTable *pwd_table = config->pwd_table[config->pwdtable_index];
+       GHashTable *ip_table = config->pwd_table[config->iptable_index];
+	network_backends_t *bs = *(network_backends_t **)luaL_checkself(L);
+	gchar *key = luaL_checklstring(L, 2, &keysize);
+       if(strchr(key, '.') == NULL) {
+              gchar **pwds = g_strsplit(key, ":", 2);
+              if(pwds && pwds[0]) {
+                     if(NULL == g_hash_table_lookup(pwd_table, pwds[0]))
+                            exist = 0;
+                     else 
+                            exist = 1;
+              }
+              g_strfreev(pwds);
+       }else {
+              guint sum = ipstr_to_value(key);
+              if(g_hash_table_contains(ip_table, &sum) == FALSE)
+                     exist = 0;
+              else
+                     exist = 1;
+       }
+       lua_pushinteger(L, exist);
+       return 1;
+}
+
 int network_backends_lua_getmetatable(lua_State *L) {
 	static const struct luaL_reg methods[] = {
 		{ "__index", proxy_backends_get },
 		{ "__newindex", proxy_backends_set },
+              {"__call", proxy_item_exist }, 
 		{ "__len", proxy_backends_len },
 		{ NULL, NULL },
 	};

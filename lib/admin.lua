@@ -61,8 +61,8 @@ function read_query(packet)
 			  type = proxy.MYSQL_TYPE_STRING },
 		--	{ name = "uuid",
 		--	  type = proxy.MYSQL_TYPE_STRING },
-		--	{ name = "connected_clients", 
-		--	  type = proxy.MYSQL_TYPE_LONG },
+			{ name = "connected_clients", 
+			  type = proxy.MYSQL_TYPE_LONG },
               --[[
             { name = "cur_idle_connections",
               type = proxy.MYSQL_TYPE_LONG },
@@ -90,7 +90,7 @@ function read_query(packet)
                     states[b.state + 1], -- the C-id is pushed down starting at 0
                     types[b.type + 1],   -- the C-id is pushed down starting at 0
                     --b.uuid,              -- the MySQL Server's UUID if it is managed
-                    --b.connected_clients  -- currently connected clients
+                    b.connected_clients  -- currently connected clients
             }
 
             --[[
@@ -207,6 +207,11 @@ function read_query(packet)
 		end
 	elseif string.find(query:lower(), "^add%s+pwds%s+.+$") then
         	local newserver = string.match(query:lower(), "^add%s+pwds%s+(.+)$")
+              local exist = proxy.global.backends(newserver)
+              if exist == 1 then  
+                     set_error("this user has been exist.") 
+                     return proxy.PROXY_SEND_RESULT
+              end
         	proxy.global.backends.addpwds = newserver
 		if proxy.global.config.rwsplit then proxy.global.config.rwsplit.max_weight = -1 end
 
@@ -216,6 +221,11 @@ function read_query(packet)
 		}
        elseif string.find(query:lower(), "^remove%s+pwds%s+.+$") then
               local newserver = string.match(query:lower(), "^remove%s+pwds%s+(.+)$")
+              local exist = proxy.global.backends(newserver)
+              if exist == 0 then  
+                     set_error("this user is not exist.") 
+                     return proxy.PROXY_SEND_RESULT
+              end
               proxy.global.backends.removepwds = newserver
               if proxy.global.config.rwsplit then proxy.global.config.rwsplit.max_weight = -1 end
 
