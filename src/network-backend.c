@@ -18,7 +18,7 @@
 
  $%ENDLICENSE%$ */
 
-#include <stdlib.h> 
+#include <stdlib.h>
 #include <string.h>
 #include <openssl/evp.h>
 
@@ -51,7 +51,7 @@ network_backend_t *network_backend_new(guint event_thread_count) {
 		network_connection_pool* pool = network_connection_pool_new();
 		g_ptr_array_add(b->second_pools, pool);
 	}
-	
+
        b->uuid = g_string_new(NULL);
 	b->addr = network_address_new();
 
@@ -67,7 +67,7 @@ void network_backend_free(network_backend_t *b) {
 		network_connection_pool_free(pool);
 	}
 	g_ptr_array_free(b->pools, TRUE);
-	
+
        for (i = 0; i < b->second_pools->len; ++i) {
 		network_connection_pool* pool = g_ptr_array_index(b->second_pools, i);
 		network_connection_pool_free(pool);
@@ -103,7 +103,7 @@ g_wrr_poll *g_wrr_poll_new() {
     global_wrr->max_weight = 0;
     global_wrr->cur_weight = 0;
     global_wrr->next_ndx = 0;
-    
+
     return global_wrr;
 }
 
@@ -119,18 +119,18 @@ void network_backends_free(network_backends_t *bs) {
 	g_mutex_lock(bs->backends_mutex);	/*remove lock*/
 	for (i = 0; i < bs->backends->len; i++) {
 		network_backend_t *backend = bs->backends->pdata[i];
-		
+
 		network_backend_free(backend);
 	}
 	g_mutex_unlock(bs->backends_mutex);	/*remove lock*/
 
 	g_ptr_array_free(bs->backends, TRUE);
         for (i = 0; i < bs->recycle_backends->len; i++) {
-                network_backend_t * b = g_ptr_array_index(bs->recycle_backends, i);  
+                network_backend_t * b = g_ptr_array_index(bs->recycle_backends, i);
                 network_backend_free(b);
-        }    
-        g_ptr_array_free(bs->recycle_backends, TRUE);  
-	
+        }
+        g_ptr_array_free(bs->recycle_backends, TRUE);
+
         g_mutex_free(bs->backends_mutex);	/*remove lock*/
         g_free(bs->config_path);
         g_wrr_poll_free(bs->global_wrr);
@@ -239,8 +239,8 @@ int network_backends_add_unlock(network_backends_t *bs, /* const */ gchar *addre
 
 network_backend_t *network_backends_get(network_backends_t *bs, guint ndx) {
         network_backend_t *item = NULL;
-        g_mutex_lock(bs->backends_mutex);       /*remove lock*/         
-        if (ndx < bs->backends->len) 
+        g_mutex_lock(bs->backends_mutex);       /*remove lock*/
+        if (ndx < bs->backends->len)
                 item = bs->backends->pdata[ndx];
         g_mutex_unlock(bs->backends_mutex);     /*remove lock*/
         return item;
@@ -280,14 +280,14 @@ network_backend_t* network_get_backend_by_addr(network_backends_t *bs, char* add
        len = bs->backends->len;
        for (i = 0; i < len; i++) {
               item = bs->backends->pdata[i];
-              gname = g_strsplit(item->addr->name->str, ":", 2); 
+              gname = g_strsplit(item->addr->name->str, ":", 2);
               if (strcmp(gname[0], addr) == 0) {
                      g_mutex_unlock(bs->backends_mutex);
                      g_strfreev(gname);
                      return item;
-              }   
+              }
               g_strfreev(gname);
-       }   
+       }
        g_mutex_unlock(bs->backends_mutex);
        return NULL;
 }
@@ -306,7 +306,7 @@ int network_backends_add_pwds(chassis *srv, gchar *pwds) {
        GHashTable *new_table = config->pwd_table[1 - config->pwdtable_index];
        GHashTable *old_table = config->pwd_table[config->pwdtable_index];
        user_password *up;
-       
+
        g_hash_table_remove_all(new_table);
        g_hash_table_foreach(old_table, copy_key, new_table);
        pwds_vec = g_strsplit(pwds, ",", 50);
@@ -329,11 +329,11 @@ int network_backends_add_pwds(chassis *srv, gchar *pwds) {
        }
        g_strfreev(pwds_vec);
 
-       if(config->pwdtable_index == 0) 
+       if(config->pwdtable_index == 0)
               g_atomic_int_inc(&(config->pwdtable_index));
-       else if(config->pwdtable_index == 1) 
+       else if(config->pwdtable_index == 1)
               g_atomic_int_dec_and_test(&(config->pwdtable_index));
-       
+
        return 0;
 }
 
@@ -341,12 +341,12 @@ int network_backends_remove_pwds(chassis *srv, gchar *users) {
        int i, j;
        gboolean is_delete = FALSE;
        gchar **users_vec;
-       
+
        chassis_plugin *p = srv->modules->pdata[1];/*proxy plugin*/
        chassis_plugin_config *config = p->config;
        GHashTable *new_table = config->pwd_table[1 - config->pwdtable_index];
        GHashTable *old_table = config->pwd_table[config->pwdtable_index];
-       
+
        g_hash_table_remove_all(new_table);
        g_hash_table_foreach(old_table, copy_key, new_table);
        users_vec = g_strsplit(users, ",", 50);
@@ -364,10 +364,10 @@ int network_backends_remove_pwds(chassis *srv, gchar *users) {
               }
        }
        g_strfreev(users_vec);
-       
-       if(config->pwdtable_index == 0) 
+
+       if(config->pwdtable_index == 0)
               g_atomic_int_inc(&(config->pwdtable_index));
-       else if(config->pwdtable_index == 1) 
+       else if(config->pwdtable_index == 1)
               g_atomic_int_dec_and_test(&(config->pwdtable_index));
 
        return 0;
@@ -378,7 +378,7 @@ int network_pwds_save_config(GKeyFile* keyfile, GPtrArray* user_vec, gchar* conf
        char *password;
        user_password *up;
        GString *pwds = g_string_new(NULL);
-       
+
        for(i = 0; i < user_vec->len; i++) {
               up = user_vec->pdata[i];
               g_string_append(pwds, up->user);
@@ -390,11 +390,11 @@ int network_pwds_save_config(GKeyFile* keyfile, GPtrArray* user_vec, gchar* conf
               }
               g_string_append(pwds, ",");
        }
-       
+
        g_string_erase(pwds, pwds->len - 1, 1); /*erase the last comma*/
        g_key_file_set_string(keyfile, "mysql-proxy", "pwds", pwds->str);
        g_string_free(pwds, TRUE);
-       
+
        return 0;
 }
 
@@ -406,7 +406,7 @@ gchar* ip_to_str(guint ip) {
        for(i = 3; 0 <= i; i--) {
               ip_seg[i] = value % 256;
               value = (value - ip_seg[i]) / 256;
-       }   
+       }
        sprintf(buf, "%d.%d.%d.%d", ip_seg[0], ip_seg[1], ip_seg[2], ip_seg[3]);
        return buf;
 }
@@ -416,7 +416,7 @@ int network_clientip_save_config(GKeyFile* keyfile, GPtrArray *clientip_vec, gch
        gchar *addr;
        guint ip_num;
        GString *client_ip_str = g_string_new(NULL);
-       
+
        for(i = 0; i < clientip_vec->len; i++) {
               ip_num = *(guint*)clientip_vec->pdata[i];
               addr = ip_to_str(ip_num);
@@ -424,11 +424,11 @@ int network_clientip_save_config(GKeyFile* keyfile, GPtrArray *clientip_vec, gch
               g_string_append(client_ip_str, ",");
               g_free(addr);
        }
-       
+
        g_string_erase(client_ip_str, client_ip_str->len - 1, 1); /*erase the last comma*/
        g_key_file_set_string(keyfile, "mysql-proxy", "client-ips", client_ip_str->str);
        g_string_free(client_ip_str, TRUE);
-       
+
        return 0;
 }
 
@@ -440,7 +440,7 @@ int network_backends_save_config(GKeyFile* keyfile, network_backends_t *bs, gcha
         master = g_string_new(NULL);
         slave = g_string_new(NULL);
         standby = g_string_new(NULL);
-        
+
         g_mutex_lock(bs->backends_mutex);
         len = bs->backends->len;
         for (i = 0; i < len; i++) {
@@ -487,11 +487,11 @@ int network_backends_save_config(GKeyFile* keyfile, network_backends_t *bs, gcha
                 g_key_file_set_string(keyfile, "mysql-proxy", "proxy-master-standby-address", standby->str);
         else
                 g_key_file_set_string(keyfile, "mysql-proxy", "proxy-master-standby-address", "");
-        
+
         g_string_free(master, TRUE);
         g_string_free(slave, TRUE);
         g_string_free(standby, TRUE);
-        
+
         return 0;
 }
 
@@ -509,7 +509,7 @@ int network_save_config(chassis *chas) {
               g_key_file_free(keyfile);
               return -1;
        }
-       
+
        network_backends_save_config(keyfile, chas->priv->backends, config_path);
        network_clientip_save_config(keyfile, chas->clientip_vec, config_path);
        network_pwds_save_config(keyfile, chas->user_vec, config_path);
@@ -526,10 +526,10 @@ int network_save_config(chassis *chas) {
               }
               g_free(file_buf);
        } else {
-              g_message("%s:save to config failure", G_STRLOC); 
+              g_message("%s:save to config failure", G_STRLOC);
        }
        g_key_file_free(keyfile);
-       
+
        return 0;
 }
 
@@ -621,6 +621,6 @@ char* pwds_encrypt(char *in) {
        len += outl;
 
        if (out[len-1] == 10) out[len-1] = '\0';
-       
+
        return out;
 }

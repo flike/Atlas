@@ -219,6 +219,20 @@ function read_query(packet)
 			{ name = "status", 
 			  type = proxy.MYSQL_TYPE_STRING },
 		}
+	elseif string.find(query:lower(), "^add%s+enpwds%s+.+$") then
+        	local newserver = string.match(query, "^add%s+enpwds%s+(.+)$")
+              local exist = proxy.global.backends(newserver)
+              if exist == 1 then  
+                     set_error("this user has been exist.") 
+                     return proxy.PROXY_SEND_RESULT
+              end
+        	proxy.global.backends.addenpwds = newserver
+		if proxy.global.config.rwsplit then proxy.global.config.rwsplit.max_weight = -1 end
+
+		fields = {
+			{ name = "status", 
+			  type = proxy.MYSQL_TYPE_STRING },
+		}
        elseif string.find(query:lower(), "^remove%s+pwds%s+.+$") then
               local newserver = string.match(query:lower(), "^remove%s+pwds%s+(.+)$")
               local exist = proxy.global.backends(newserver)
