@@ -165,6 +165,12 @@ gchar* convert_pwds(const gchar* pwds) {
  *
  * @return nil or the backend
  */
+
+void* change_master_thread_func(chassis *srv) {
+        int ret = change_master(srv);
+        g_thread_exit((void*)ret);
+}
+
 static int proxy_backends_set(lua_State *L) {
 	network_backends_t *bs = *(network_backends_t **)luaL_checkself(L);
 	gsize keysize = 0;
@@ -175,7 +181,9 @@ static int proxy_backends_set(lua_State *L) {
 	} else if (strleq(key, keysize, C("addmaster"))) {
         	network_backends_add(bs, g_strdup(lua_tostring(L, -1)), BACKEND_TYPE_RW);
        } else if (strleq(key, keysize, C("changemaster"))) {
-              change_standby_to_master(bs);
+              //change_standby_to_master(bs);
+              GThread* t = g_thread_new("change_master_thread", change_master_thread_func, srv);
+//              g_thread_join(t);
 	} else if (strleq(key, keysize, C("addstandby"))) {
         	network_backends_add(bs, g_strdup(lua_tostring(L, -1)), BACKEND_TYPE_SY);
 	} else if (strleq(key, keysize, C("removebackend"))) {

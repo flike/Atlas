@@ -1,5 +1,5 @@
 /* $%BEGINLICENSE%$
-                            
+
  Copyright (c) 2007, 2010, Oracle and/or its affiliates. All rights reserved.
 
  This program is free software; you can redistribute it and/or
@@ -18,16 +18,16 @@
  02110-1301  USA
 
  $%ENDLICENSE%$ */
- 
+
 
 #ifdef HAVE_CONFIG_H
 #include "config.h"
 #endif
 
-/** 
+/**
  * @page page-plugin-proxy Proxy plugin
  *
- * The MySQL Proxy implements the MySQL Protocol in its own way. 
+ * The MySQL Proxy implements the MySQL Protocol in its own way.
  *
  *   -# connect @msc
  *   client, proxy, backend;
@@ -55,34 +55,34 @@
  * @endmsc
  *
  *   - network_mysqld_proxy_connection_init()
- *     -# registers the callbacks 
+ *     -# registers the callbacks
  *   - proxy_connect_server() (CON_STATE_CONNECT_SERVER)
  *     -# calls the connect_server() function in the lua script which might decide to
  *       -# send a handshake packet without contacting the backend server (CON_STATE_SEND_HANDSHAKE)
  *       -# closing the connection (CON_STATE_ERROR)
  *       -# picking a active connection from the connection pool
  *       -# pick a backend to authenticate against
- *       -# do nothing 
+ *       -# do nothing
  *     -# by default, pick a backend from the backend list on the backend with the least active connctions
  *     -# opens the connection to the backend with connect()
- *     -# when done CON_STATE_READ_HANDSHAKE 
+ *     -# when done CON_STATE_READ_HANDSHAKE
  *   - proxy_read_handshake() (CON_STATE_READ_HANDSHAKE)
- *     -# reads the handshake packet from the server 
+ *     -# reads the handshake packet from the server
  *   - proxy_read_auth() (CON_STATE_READ_AUTH)
- *     -# reads the auth packet from the client 
+ *     -# reads the auth packet from the client
  *   - proxy_read_auth_result() (CON_STATE_READ_AUTH_RESULT)
- *     -# reads the auth-result packet from the server 
+ *     -# reads the auth-result packet from the server
  *   - proxy_send_auth_result() (CON_STATE_SEND_AUTH_RESULT)
  *   - proxy_read_query() (CON_STATE_READ_QUERY)
- *     -# reads the query from the client 
+ *     -# reads the query from the client
  *   - proxy_read_query_result() (CON_STATE_READ_QUERY_RESULT)
- *     -# reads the query-result from the server 
+ *     -# reads the query-result from the server
  *   - proxy_send_query_result() (CON_STATE_SEND_QUERY_RESULT)
  *     -# called after the data is written to the client
  *     -# if scripts wants to close connections, goes to CON_STATE_ERROR
  *     -# if queries are in the injection queue, goes to CON_STATE_SEND_QUERY
  *     -# otherwise goes to CON_STATE_READ_QUERY
- *     -# does special handling for COM_BINLOG_DUMP (go to CON_STATE_READ_QUERY_RESULT) 
+ *     -# does special handling for COM_BINLOG_DUMP (go to CON_STATE_READ_QUERY_RESULT)
 
  */
 
@@ -216,7 +216,7 @@ static network_mysqld_lua_stmt_ret proxy_lua_read_handshake(network_mysqld_con *
 	g_assert(lua_isfunction(L, -1));
 	lua_getfenv(L, -1);
 	g_assert(lua_istable(L, -1));
-	
+
 	lua_getfield_literal(L, -1, C("read_handshake"));
 	if (lua_isfunction(L, -1)) {
 		/* export
@@ -236,7 +236,7 @@ static network_mysqld_lua_stmt_ret proxy_lua_read_handshake(network_mysqld_con *
 			}
 			lua_pop(L, 1);
 		}
-	
+
 		switch (ret) {
 		case PROXY_NO_DECISION:
 			break;
@@ -256,7 +256,7 @@ static network_mysqld_lua_stmt_ret proxy_lua_read_handshake(network_mysqld_con *
 				 *
 				 * send a ERR packet
 				 */
-		
+
 				network_mysqld_con_send_error(con->client, C("(lua) handling proxy.response failed, check error-log"));
 			}
 
@@ -283,7 +283,7 @@ static network_mysqld_lua_stmt_ret proxy_lua_read_handshake(network_mysqld_con *
  * parse the hand-shake packet from the server
  *
  *
- * @note the SSL and COMPRESS flags are disabled as we can't 
+ * @note the SSL and COMPRESS flags are disabled as we can't
  *       intercept or parse them.
  */
 NETWORK_MYSQLD_PLUGIN_PROTO(proxy_read_handshake) {
@@ -361,7 +361,7 @@ NETWORK_MYSQLD_PLUGIN_PROTO(proxy_read_handshake) {
 	default:
 		g_error("%s.%d: ...", __FILE__, __LINE__);
 		break;
-	} 
+	}
 
 	challenge_packet = g_string_sized_new(packet.data->len); /* the packet we generate will be likely as large as the old one. should save some reallocs */
 	network_mysqld_proto_append_auth_challenge(challenge_packet, challenge);
@@ -387,7 +387,7 @@ static network_mysqld_lua_stmt_ret proxy_lua_read_auth(network_mysqld_con *con) 
 
 	/* call the lua script to pick a backend
 	   ignore the return code from network_mysqld_con_lua_register_callback, because we cannot do anything about it,
-	   it would always show up as ERROR 2013, which is not helpful.	
+	   it would always show up as ERROR 2013, which is not helpful.
 	*/
 	(void)network_mysqld_con_lua_register_callback(con, con->config->lua_script);
 
@@ -398,7 +398,7 @@ static network_mysqld_lua_stmt_ret proxy_lua_read_auth(network_mysqld_con *con) 
 	g_assert(lua_isfunction(L, -1));
 	lua_getfenv(L, -1);
 	g_assert(lua_istable(L, -1));
-	
+
 	lua_getfield_literal(L, -1, C("read_auth"));
 	if (lua_isfunction(L, -1)) {
 
@@ -432,7 +432,7 @@ static network_mysqld_lua_stmt_ret proxy_lua_read_auth(network_mysqld_con *con) 
 				 *
 				 * send a ERR packet
 				 */
-		
+
 				network_mysqld_con_send_error(con->client, C("(lua) handling proxy.response failed, check error-log"));
 			}
 
@@ -556,8 +556,8 @@ NETWORK_MYSQLD_PLUGIN_PROTO(proxy_read_auth_result) {
 	/* send the auth result to the client */
 	if (con->server->is_authed) {
 		/**
-		 * we injected a COM_CHANGE_USER above and have to correct to 
-		 * packet-id now 
+		 * we injected a COM_CHANGE_USER above and have to correct to
+		 * packet-id now
          * if config->pool_change_user is false, we don't inject a COM_CHANGE_USER and jump to send_auth_result directly,
          * will not reach here.
 		 */
@@ -565,13 +565,13 @@ NETWORK_MYSQLD_PLUGIN_PROTO(proxy_read_auth_result) {
 	}
 
 	/**
-	 * copy the 
-	 * - default-db, 
+	 * copy the
+	 * - default-db,
         * - charset,
-	 * - username, 
+	 * - username,
 	 * - scrambed_password
 	 *
-	 * to the server-side 
+	 * to the server-side
 	 */
        g_string_assign_len(recv_sock->charset_client, S(send_sock->charset_client));
        g_string_assign_len(recv_sock->charset_connection, S(send_sock->charset_connection));
@@ -595,7 +595,7 @@ NETWORK_MYSQLD_PLUGIN_PROTO(proxy_read_auth_result) {
 	 * we handled the packet on the server side, free it
 	 */
 	g_queue_delete_link(recv_sock->recv_queue->chunks, chunk);
-	
+
 	/* the auth phase is over
 	 *
 	 * reset the packet-id sequence
@@ -619,19 +619,19 @@ int rw_split(GPtrArray* tokens, network_mysqld_con* con) {
 		if (strcasecmp(first_token->text->str, "MASTER") == 0) {
 			return idle_rw(con);
 		} else {
-			guint i = 1; 
+			guint i = 1;
 			while (token_id == TK_COMMENT && ++i < tokens->len) {
 				first_token = tokens->pdata[i];
 				token_id = first_token->token_id;
-			}    
-		}    
+			}
+		}
 	}
 
 	if (token_id == TK_SQL_SELECT || token_id == TK_SQL_SET || token_id == TK_SQL_USE || token_id == TK_SQL_SHOW || token_id == TK_SQL_DESC || token_id == TK_SQL_EXPLAIN) {
 		return wrr_ro(con);
 	} else {
 		return idle_rw(con);
-	}    
+	}
 }
 
 void modify_user(network_mysqld_con* con) {
@@ -811,9 +811,9 @@ void check_flags(GPtrArray* tokens, network_mysqld_con* con, int* need_keep_conn
        }
 
        now = my_timer_microseconds();
-       if(now > con->write_sql_time + con->config->keep_connection_time * 1000) { 
+       if(now > con->write_sql_time + con->config->keep_connection_time * 1000) {
               *need_keep_conn = 0;
-       }else { 
+       }else {
               *need_keep_conn = 1;
        }
        if(*is_write_sql) con->write_sql_time = now;
@@ -848,17 +848,17 @@ int parse_stmt_prepare_result(network_packet *packet, network_mysqld_con* con) {
     	network_socket *recv_sock, *send_sock;
 
     	if (!packet) return -1;
-    
+
     	send_sock = con->client;
     	recv_sock = con->server;
-   
+
     	err = err || network_mysqld_proto_skip_network_header(packet);
     	err = err || network_mysqld_proto_get_int8(packet, &status);
     	//err packet
     	if (status == 0xff) {
         	guint16 errcode;
         	gchar *errmsg = NULL;
-        
+
         	//packet->offset += 1; // skip 0xff
         	err = err || network_mysqld_proto_get_int16(packet, &errcode);
         	packet->offset += 6;
@@ -867,7 +867,7 @@ int parse_stmt_prepare_result(network_packet *packet, network_mysqld_con* con) {
         	}
         	g_warning("[%s]: error packet from server (%s -> %s): %s(%d)", G_STRLOC,recv_sock->dst->name->str, recv_sock->src->name->str, errmsg, errcode);
         	if (errmsg) g_free(errmsg);
-        	return -1; 
+        	return -1;
     	}
     	err = err || network_mysqld_proto_get_int32(packet, &db_stmt_id);
     	return err==0 ? db_stmt_id : err;
@@ -883,9 +883,9 @@ void send_close_prepare(network_mysqld_con* con) {
    	network_mysqld_proto_append_int8(close_packet, COM_STMT_CLOSE);
    	if (con->parse.command == COM_STMT_PREPARE)
        		network_mysqld_proto_append_int32(close_packet, con->close_stmt_id);
-   	else 
+   	else
        		network_mysqld_proto_append_int32(close_packet, con->execute_stmt_id);
-   
+
    	to_write = close_packet->len;
    	offset = 0;
    	while (to_write > 0) {
@@ -914,7 +914,7 @@ network_mysqld_lua_stmt_ret handle_stmt_prepare_packet(GString *packet,network_m
 	sp->query = g_strdup(packet->str+1);
 	con->proxy_stmt_id = sp->stmt_id;
 	g_hash_table_insert(con->stmt_hash_table, GINT_TO_POINTER(&(sp->stmt_id)), sp);
-	
+
 	return PROXY_SEND_INJECTION;
 }
 
@@ -926,7 +926,7 @@ network_mysqld_lua_stmt_ret handle_stmt_execute_packet(GString *packet,network_m
 	GString *prepare_packet;
        sql_token** ts;
 	injection *inj_execute = NULL,*inj_prepare = NULL;
-	
+
 	network_mysqld_con_lua_t *st = con->plugin_con_state;
 	np.data = packet;
 	np.offset = 0;
@@ -957,7 +957,7 @@ network_mysqld_lua_stmt_ret handle_stmt_execute_packet(GString *packet,network_m
        else
               inj_execute->resultset_is_needed = TRUE;
 	g_queue_push_tail(st->injected.queries, inj_execute);
-	
+
 	return PROXY_SEND_INJECTION;
 }
 
@@ -979,7 +979,7 @@ int handle_stmt_close_packet(GString *packet,network_mysqld_con* con) {
 		g_critical("%s:can't remove stmt in hash table",G_STRLOC);
 		err = -1;
 	}
-	if (con->client) 
+	if (con->client)
 		network_mysqld_queue_reset(con->client);
 	con->state = CON_STATE_READ_QUERY;
 	return err;
@@ -1019,12 +1019,12 @@ NETWORK_MYSQLD_PLUGIN_PROTO(proxy_read_query) {
 		g_string_free(packets, TRUE);
 		network_mysqld_con_send_ok_full(con->client, 0, 0, 0x0002, 0);
 		ret = PROXY_SEND_RESULT;
-	} else { 
+	} else {
 		GPtrArray *tokens = sql_tokens_new();
 		sql_tokenizer(tokens, packets->str, packets->len);
               check_flags(tokens, con, &need_keep_conn, &is_write_sql);
-	    	
-              if (type == COM_QUERY && con->config->reg_array->len && is_in_blacklist(con, packets)) {	
+
+              if (type == COM_QUERY && con->config->reg_array->len && is_in_blacklist(con, packets)) {
             		g_string_free(packets, TRUE);
 			network_mysqld_con_send_error_full(con->client, C("Proxy Warning - Syntax Forbidden"), ER_UNKNOWN_ERROR, "07000");
 			ret = PROXY_SEND_RESULT;
@@ -1123,7 +1123,8 @@ NETWORK_MYSQLD_PLUGIN_PROTO(proxy_read_query) {
                                                  network_backend_t *backend = network_backends_get(con->srv->priv->backends, backend_ndx);
                                                  network_backend_t *master = network_get_backend_by_type(con->srv->priv->backends, BACKEND_TYPE_RW);
                                                  if ((backend && backend->type == BACKEND_TYPE_RW && errno == ECONNREFUSED) || (backend_ndx == -1 && master->state == BACKEND_STATE_DOWN)) {
-                                                        change_standby_to_master(con->srv->priv->backends);
+                                                        //change_standby_to_master(con->srv->priv->backends);
+                                                        while(change_master(con->srv) > 0) sleep(2);
                                                  }
                                           }
                                    } else if (type == COM_INIT_DB || type == COM_SET_OPTION || type == COM_FIELD_LIST) {
@@ -1152,7 +1153,7 @@ NETWORK_MYSQLD_PLUGIN_PROTO(proxy_read_query) {
 
 	/**
 	 * if we disconnected in read_query_result() we have no connection open
-	 * when we try to execute the next query 
+	 * when we try to execute the next query
 	 *
 	 * for PROXY_SEND_RESULT we don't need a server
 	 */
@@ -1170,7 +1171,7 @@ NETWORK_MYSQLD_PLUGIN_PROTO(proxy_read_query) {
                      return NETWORK_SOCKET_WAIT_FOR_EVENT;
               }
 	}
-	
+
 	switch (ret) {
 	case PROXY_NO_DECISION:
 	case PROXY_SEND_QUERY:
@@ -1212,7 +1213,7 @@ NETWORK_MYSQLD_PLUGIN_PROTO(proxy_read_query) {
 		break; }
 	case PROXY_SEND_INJECTION: {
 		injection *inj;
-		
+
               inj = g_queue_peek_head(st->injected.queries);
 		con->resultset_is_needed = inj->resultset_is_needed; /* let the lua-layer decide if we want to buffer the result or not */
 
@@ -1233,7 +1234,7 @@ NETWORK_MYSQLD_PLUGIN_PROTO(proxy_read_query) {
 	} else {
 		GList *cur;
 
-		/* if we don't send the query to the backend, it won't be tracked. So track it here instead 
+		/* if we don't send the query to the backend, it won't be tracked. So track it here instead
 		 * to get the packet tracking right (LOAD DATA LOCAL INFILE, ...) */
 
 		for (cur = send_sock->send_queue->chunks->head; cur; cur = cur->next) {
@@ -1255,9 +1256,9 @@ NETWORK_MYSQLD_PLUGIN_PROTO(proxy_read_query) {
 }
 
 /**
- * decide about the next state after the result-set has been written 
+ * decide about the next state after the result-set has been written
  * to the client
- * 
+ *
  * if we still have data in the queue, back to proxy_send_query()
  * otherwise back to proxy_read_query() to pick up a new client query
  *
@@ -1302,8 +1303,8 @@ NETWORK_MYSQLD_PLUGIN_PROTO(proxy_send_query_result) {
 		return NETWORK_SOCKET_SUCCESS;
 	}
 
-	/* looks like we still have queries in the queue, 
-	 * push the next one 
+	/* looks like we still have queries in the queue,
+	 * push the next one
 	 */
 	inj = g_queue_peek_head(st->injected.queries);
 	con->resultset_is_needed = inj->resultset_is_needed;
@@ -1499,7 +1500,7 @@ NETWORK_MYSQLD_PLUGIN_PROTO(proxy_read_query_result) {
 	}
 	is_finished = network_mysqld_proto_get_query_result(&packet, con);
 	if (is_finished == -1) return NETWORK_SOCKET_ERROR; /* something happend, let's get out of here */
-    
+
 	if (con->parse.command == COM_STMT_PREPARE && is_finished && st->injected.queries->length > 1) {
 		//free prepare ok packet
 		if (con->resultset_is_needed) {
@@ -1508,7 +1509,7 @@ NETWORK_MYSQLD_PLUGIN_PROTO(proxy_read_query_result) {
 		}
 		// pop prepare inj
 		inj = g_queue_pop_head(st->injected.queries);
-		inj->ts_read_query_result_last = chassis_get_rel_microseconds();	
+		inj->ts_read_query_result_last = chassis_get_rel_microseconds();
 		log_sql(con, inj);
 		//insert execute inj into con->server send queue
 		inj = g_queue_peek_head(st->injected.queries);
@@ -1534,7 +1535,7 @@ NETWORK_MYSQLD_PLUGIN_PROTO(proxy_read_query_result) {
 
 		/**
 		 * the resultset handler might decide to trash the send-queue
-		 * 
+		 *
 		 * */
 		//g_mutex_lock(&mutex);
 		if (inj) {
@@ -1567,9 +1568,9 @@ NETWORK_MYSQLD_PLUGIN_PROTO(proxy_read_query_result) {
 			inj = g_queue_pop_head(st->injected.queries);
 			char* str = inj->query->str + 1;
 			if (inj->id == 1) {
-				if (*(str-1) == COM_QUERY) 
+				if (*(str-1) == COM_QUERY)
 					log_sql(con, inj);
-				else if (*(str-1) == COM_STMT_PREPARE || *(str-1) == COM_STMT_EXECUTE) 
+				else if (*(str-1) == COM_STMT_PREPARE || *(str-1) == COM_STMT_EXECUTE)
 					send_close_prepare(con);
 				ret = PROXY_SEND_RESULT;
 			} else if (inj->id == 7) {
@@ -1643,7 +1644,7 @@ NETWORK_MYSQLD_PLUGIN_PROTO(proxy_read_query_result) {
 						/* in case we got the connection from the pool it has the response from the previous auth */
 						network_mysqld_auth_response_free(con->server->response);
 						con->server->response = NULL;
-					}    
+					}
 					con->server->response = network_mysqld_auth_response_copy(con->client->response);
 				}
 			}
@@ -1682,7 +1683,7 @@ NETWORK_MYSQLD_PLUGIN_PROTO(proxy_read_query_result) {
                                    guint64 now = my_timer_microseconds();
                                    if(now > con->write_sql_time + con->config->keep_connection_time * 1000)
                                           network_connection_pool_lua_add_connection(con, 0);
-                                   else 
+                                   else
                                           network_connection_pool_lua_add_connection(con, 1);
                                    con->backend_ndx = -1;
                             }
@@ -1724,7 +1725,7 @@ NETWORK_MYSQLD_PLUGIN_PROTO(proxy_read_query_result) {
 		}
 	}
 	NETWORK_MYSQLD_CON_TRACK_TIME(con, "proxy::ready_query_result::leave");
-	
+
 	return NETWORK_SOCKET_SUCCESS;
 }
 
@@ -1755,7 +1756,7 @@ NETWORK_MYSQLD_PLUGIN_PROTO(proxy_connect_server) {
 		if (i == 3 && !g_hash_table_contains(config->lvs_table, &(con->client->src->addr.ipv4.sin_addr.s_addr))) {
 			network_mysqld_con_send_error_full(con->client, C("Proxy Warning - IP Forbidden"), ER_UNKNOWN_ERROR, "07000");
 			return NETWORK_SOCKET_SUCCESS;
-		}    
+		}
 	}
 
 	network_mysqld_auth_challenge *challenge = network_mysqld_auth_challenge_new();
@@ -1791,16 +1792,16 @@ NETWORK_MYSQLD_PLUGIN_PROTO(proxy_init) {
 	st = network_mysqld_con_lua_new();
 
 	con->plugin_con_state = st;
-	
+
 	con->state = CON_STATE_CONNECT_SERVER;
 
 	return NETWORK_SOCKET_SUCCESS;
 }
 
 /**
- * cleanup the proxy specific data on the current connection 
+ * cleanup the proxy specific data on the current connection
  *
- * move the server connection into the connection pool in case it is a 
+ * move the server connection into the connection pool in case it is a
  * good client-side close
  *
  * @return NETWORK_SOCKET_SUCCESS
@@ -1811,7 +1812,7 @@ NETWORK_MYSQLD_PLUGIN_PROTO(proxy_disconnect_client) {
 	lua_scope  *sc = con->srv->priv->sc;
 
 	if (st == NULL) return NETWORK_SOCKET_SUCCESS;
-	
+
 #ifdef HAVE_LUA_H
 	/* remove this cached script from registry */
 	if (st->L_ref > 0) {
@@ -1846,7 +1847,7 @@ NETWORK_MYSQLD_PLUGIN_PROTO(proxy_read_local_infile_data) {
 	network_mysqld_com_query_result_t *com_query = con->parse.data;
 
 	NETWORK_MYSQLD_CON_TRACK_TIME(con, "proxy::ready_query_result::enter");
-	
+
 	recv_sock = con->client;
 	send_sock = con->server;
 
@@ -1869,7 +1870,7 @@ NETWORK_MYSQLD_PLUGIN_PROTO(proxy_read_local_infile_data) {
 		/* we don't have a backend
 		 *
 		 * - free the received packets early
-		 * - send a OK later 
+		 * - send a OK later
 		 */
 		while ((s = g_queue_pop_head(recv_sock->recv_queue->chunks))) g_string_free(s, TRUE);
 	}
@@ -1905,7 +1906,7 @@ NETWORK_MYSQLD_PLUGIN_PROTO(proxy_read_local_infile_result) {
 	/* check if the last packet is valid */
 	packet.data = g_queue_peek_tail(recv_sock->recv_queue->chunks);
 	packet.offset = 0;
-	
+
 	query_result = network_mysqld_proto_get_query_result(&packet, con);
 	if (query_result == -1) return NETWORK_SOCKET_ERROR; /* something happend, let's get out of here */
 
@@ -1972,7 +1973,7 @@ chassis_plugin_config * network_mysqld_proxy_plugin_new(void) {
 	config->fix_bug_25371   = 0; /** double ERR packet on AUTH failures */
 	config->profiling       = 1;
 	config->start_proxy     = 1;
-	config->pool_change_user = 1; /* issue a COM_CHANGE_USER to cleanup the connection 
+	config->pool_change_user = 1; /* issue a COM_CHANGE_USER to cleanup the connection
 					 when we get back the connection from the pool */
 	config->ip_table[0] = g_hash_table_new_full(g_int_hash, g_int_equal, g_free, NULL);
 	config->ip_table[1]= g_hash_table_new_full(g_int_hash, g_int_equal, g_free, NULL);
@@ -2014,7 +2015,7 @@ void network_mysqld_proxy_plugin_free(chassis_plugin_config *config) {
 		}
 		g_free(config->backend_addresses);
 	}
-    
+
        if (config->master_standby_addresses) {
               g_strfreev(config->master_standby_addresses);
        }
@@ -2042,7 +2043,7 @@ void network_mysqld_proxy_plugin_free(chassis_plugin_config *config) {
 	g_hash_table_remove_all(config->ip_table[1]);
 	g_hash_table_destroy(config->ip_table[1]);
        g_hash_table_destroy(config->rule_table);
-        
+
         if (config->lvs_ips) {
 		for (i = 0; config->lvs_ips[i]; i++) {
 			g_free(config->lvs_ips[i]);
@@ -2071,6 +2072,7 @@ void network_mysqld_proxy_plugin_free(chassis_plugin_config *config) {
 	if (config->sql_log) fclose(config->sql_log);
 	if (config->sql_log_type) g_free(config->sql_log_type);
 
+        if (config->change_master_script) g_free(config->change_master_script);
 	if (config->charset) g_free(config->charset);
 	if (config->fsql) g_strfreev(config->fsql);
        if (config->reg_array) {
@@ -2088,16 +2090,16 @@ void network_mysqld_proxy_plugin_free(chassis_plugin_config *config) {
 }
 
 /**
- * plugin options 
+ * plugin options
  */
 static GOptionEntry * network_mysqld_proxy_plugin_get_options(chassis_plugin_config *config) {
 	guint i;
 
 	/* make sure it isn't collected */
-	static GOptionEntry config_entries[] = 
+	static GOptionEntry config_entries[] =
 	{
 		{ "proxy-address",            'P', 0, G_OPTION_ARG_STRING, NULL, "listening address:port of the proxy-server (default: :4040)", "<host:port>" },
-		{ "proxy-read-only-backend-addresses", 
+		{ "proxy-read-only-backend-addresses",
 					      'r', 0, G_OPTION_ARG_STRING_ARRAY, NULL, "address:port of the remote slave-server (default: not set)", "<host:port>" },
 		{ "proxy-backend-addresses",  'b', 0, G_OPTION_ARG_STRING_ARRAY, NULL, "address:port of the remote backend-servers (default: 127.0.0.1:3306)", "<host:port>" },
 		{ "proxy-master-standby-address",  0, 0, G_OPTION_ARG_STRING_ARRAY, NULL, "address:port of the remote master-standby-servers ", "<host:port>" },
@@ -2105,19 +2107,19 @@ static GOptionEntry * network_mysqld_proxy_plugin_get_options(chassis_plugin_con
 
 		{ "proxy-fix-bug-25371",      0, 0, G_OPTION_ARG_NONE, NULL, "fix bug #25371 (mysqld > 5.1.12) for older libmysql versions", NULL },
 		{ "proxy-lua-script",         's', 0, G_OPTION_ARG_FILENAME, NULL, "filename of the lua script (default: not set)", "<file>" },
-		
+
 		{ "no-proxy",                 0, G_OPTION_FLAG_REVERSE, G_OPTION_ARG_NONE, NULL, "don't start the proxy-module (default: enabled)", NULL },
-		
+
 		{ "proxy-pool-no-change-user", 0, G_OPTION_FLAG_REVERSE, G_OPTION_ARG_NONE, NULL, "don't use CHANGE_USER to reset the connection coming from the pool (default: enabled)", NULL },
 
 		{ "client-ips", 0, 0, G_OPTION_ARG_STRING_ARRAY, NULL, "all permitted client ips", NULL },
-	
+
 		{ "lvs-ips", 0, 0, G_OPTION_ARG_STRING_ARRAY, NULL, "all lvs ips", NULL },
 
 		{ "tables", 0, 0, G_OPTION_ARG_STRING_ARRAY, NULL, "sub-table settings", NULL },
-	
+
 		{ "pwds", 0, 0, G_OPTION_ARG_STRING_ARRAY, NULL, "password settings", NULL },
-		
+
 		{ "charset", 0, 0, G_OPTION_ARG_STRING, NULL, "original charset(default: LATIN1)", NULL },
 
 		{ "sql-log", 0, 0, G_OPTION_ARG_STRING, NULL, "sql log type(default: OFF)", NULL },
@@ -2128,7 +2130,8 @@ static GOptionEntry * network_mysqld_proxy_plugin_get_options(chassis_plugin_con
               { "max-connections", 0, 0, G_OPTION_ARG_INT, NULL, "the max connections of one DB (default:0)", NULL },
               { "keep-connection-time", 0, 0, G_OPTION_ARG_INT, NULL, "the expire time of keeping connection(default:0)", NULL },
               { "wait-timeout", 0, 0, G_OPTION_ARG_INT, NULL, "the number of seconds Atlas waits for activity on a noninteractive connection before closing it.(default:0)", NULL },
-		{ NULL,                       0, 0, G_OPTION_ARG_NONE,   NULL, NULL, NULL }
+              { "change-master-script", '0', 0, G_OPTION_ARG_FILENAME, NULL, "filename of the change master script (default: not set)", NULL },
+              { NULL,                       0, 0, G_OPTION_ARG_NONE,   NULL, NULL, NULL }
 	};
 
 	i = 0;
@@ -2156,6 +2159,7 @@ static GOptionEntry * network_mysqld_proxy_plugin_get_options(chassis_plugin_con
        config_entries[i++].arg_data = &(config->max_connections);
        config_entries[i++].arg_data = &(config->keep_connection_time);
        config_entries[i++].arg_data = &(config->wait_timeout);
+       config_entries[i++].arg_data = &(config->change_master_script);
 	return config_entries;
 }
 
@@ -2197,18 +2201,18 @@ void* check_state(chassis *chas) {
                      mysql_real_connect(&mysql, ip, user, pwd_decr, NULL, port, NULL, 0);
 
                      if(backend->state == BACKEND_STATE_UP) {
-                            if(mysql_errno(&mysql) == 0) { 
+                            if(mysql_errno(&mysql) == 0) {
                                    backend->connect_times = 0;
                             } else {
                                    if(backend->connect_times < config->connect_times) {
                                           ++(backend->connect_times);
-                                   } else { 
+                                   } else {
                                           backend->state = BACKEND_STATE_DOWN;
                                           backend->connect_times = 0;
                                    }
                             }
                      } else if(backend->state == BACKEND_STATE_DOWN) {
-                            if(mysql_errno(&mysql) == 0) { 
+                            if(mysql_errno(&mysql) == 0) {
                                    if(backend->connect_times < config->connect_times) {
                                           ++(backend->connect_times);
                                    } else {
@@ -2219,7 +2223,7 @@ void* check_state(chassis *chas) {
                                           backend->connect_times = 0;
                             }
                      } else if(backend->state == BACKEND_STATE_UNKNOWN) {
-                            if(mysql_errno(&mysql) == 0) 
+                            if(mysql_errno(&mysql) == 0)
                                    backend->state = BACKEND_STATE_UP;
                             else
                                    backend->state = BACKEND_STATE_DOWN;
@@ -2235,41 +2239,41 @@ void proxy_plugin_insert_clientips(gchar** arg_string_array, chassis_plugin_conf
         int i, j;
         char* token;
         guint* sum = NULL;
-        
+
         if (config->iptable_index == 0) {
                 g_hash_table_remove_all(config->ip_table[1]);
         }else if (config->iptable_index == 1) {
                 g_hash_table_remove_all(config->ip_table[0]);
         }
-        
+
         GPtrArray *clientip_vec = srv->clientip_vec;
         if(clientip_vec) {
                for(i = 0; i < clientip_vec->len; i++) {
                       guint *item = clientip_vec->pdata[i];
                       g_free(item);
-               }   
-        }   
+               }
+        }
         g_ptr_array_remove_range(clientip_vec, 0, clientip_vec->len);
 
         for (j = 0; arg_string_array && arg_string_array[j]; j++) {
                 arg_string_array[j] = g_strstrip(arg_string_array[j]);
-                sum = g_new0(guint, 1); 
+                sum = g_new0(guint, 1);
                 while ((token = strsep(&arg_string_array[j], ".")) != NULL) {
                         *sum = (*sum << 8) + atoi(token);
-                }   
+                }
                 *sum = htonl(*sum);
                 if (config->iptable_index == 0) {
                         g_hash_table_add(config->ip_table[1], sum);
                 }else if (config->iptable_index == 1) {
                         g_hash_table_add(config->ip_table[0], sum);
-                } 
+                }
                 guint* sum_copy = g_new0(guint, 1);
                 *sum_copy = *sum;
                 g_ptr_array_add(srv->clientip_vec, sum_copy);
         }
-        if (config->iptable_index == 0) 
+        if (config->iptable_index == 0)
                 g_atomic_int_inc(&(config->iptable_index));
-        else if (config->iptable_index == 1) 
+        else if (config->iptable_index == 1)
                 g_atomic_int_dec_and_test(&(config->iptable_index));
 }
 
@@ -2320,17 +2324,17 @@ int proxy_plugin_insert_pwds(gchar** arg_string_array, chassis_plugin_config *co
                         return -1;
                 }
         }
-        if (config->pwdtable_index == 0) 
+        if (config->pwdtable_index == 0)
                 g_atomic_int_inc(&(config->pwdtable_index));
-        else if (config->pwdtable_index == 1) 
+        else if (config->pwdtable_index == 1)
                 g_atomic_int_dec_and_test(&(config->pwdtable_index));
-        
+
         return 0;
 }
 
 int get_forbidden_sql(GPtrArray *reg_array, char **fsql) {
        int i, ret;
-       regex_t *reg = NULL; 
+       regex_t *reg = NULL;
        char ebuf[128];
        if(fsql == NULL) return 0;
        for(i = 0; fsql&&fsql[i]; i++) {
@@ -2363,7 +2367,7 @@ int network_mysqld_proxy_plugin_apply_config(chassis *chas, chassis_plugin_confi
     if (!config->address) {
         g_critical("%s: Failed to get bind address, please set by --proxy-address=<host:port>",
                 G_STRLOC);
-        return -1; 
+        return -1;
     }
 
 	if (!config->backend_addresses) {
@@ -2371,15 +2375,15 @@ int network_mysqld_proxy_plugin_apply_config(chassis *chas, chassis_plugin_confi
 		config->backend_addresses[0] = g_strdup("127.0.0.1:3306");
 	}
 
-	/** 
-	 * create a connection handle for the listen socket 
+	/**
+	 * create a connection handle for the listen socket
 	 */
 	con = network_mysqld_con_new();
 	network_mysqld_add_connection(chas, con);
 	con->config = config;
 
 	config->listen_con = con;
-	
+
 	listen_sock = network_socket_new();
 	con->server = listen_sock;
 
@@ -2396,11 +2400,11 @@ int network_mysqld_proxy_plugin_apply_config(chassis *chas, chassis_plugin_confi
 	g_message("proxy listening on port %s", config->address);
 
 	for (i = 0; config->backend_addresses && config->backend_addresses[i]; i++) {
-		if (-1 == network_backends_add(g->backends, config->backend_addresses[i], BACKEND_TYPE_RW)) {		
+		if (-1 == network_backends_add(g->backends, config->backend_addresses[i], BACKEND_TYPE_RW)) {
 			return -1;
 		}
 	}
-	
+
 	for (i = 0; config->read_only_backend_addresses && config->read_only_backend_addresses[i]; i++) {
 		if (-1 == network_backends_add(g->backends, config->read_only_backend_addresses[i], BACKEND_TYPE_RO)) {
 			return -1;
@@ -2422,7 +2426,7 @@ int network_mysqld_proxy_plugin_apply_config(chassis *chas, chassis_plugin_confi
 		*sum = htonl(*sum);
 		g_hash_table_add(config->ip_table[0], sum);
               *sum_copy = *sum;
-              g_ptr_array_add(srv->clientip_vec, sum_copy); 
+              g_ptr_array_add(srv->clientip_vec, sum_copy);
 	}
 
 	for (i = 0; config->lvs_ips && config->lvs_ips[i]; i++) {

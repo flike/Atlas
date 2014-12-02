@@ -32,11 +32,11 @@ struct chassis_plugin_config {
 
 	gchar **backend_addresses;        /**< read-write backends */
 	gchar **read_only_backend_addresses; /**< read-only  backends */
-       gchar **master_standby_addresses; 
+       gchar **master_standby_addresses;
 	gint fix_bug_25371;               /**< suppress the second ERR packet of bug #25371 */
 
 	gint profiling;                   /**< skips the execution of the read_query() function */
-	
+
 	gchar *lua_script;                /**< script to load at the start the connection */
 
 	gint pool_change_user;            /**< don't reset the connection, when a connection is taken from the pool
@@ -76,6 +76,9 @@ struct chassis_plugin_config {
        gint max_connections;
        gint keep_connection_time;
        gint wait_timeout;
+       gchar* change_master_script;
+       gint is_changing_master;
+       guint64 last_change_time;
 };
 
 NETWORK_API int network_connection_pool_getmetatable(lua_State *L);
@@ -85,6 +88,7 @@ NETWORK_API int wrr_ro(network_mysqld_con *con);
 NETWORK_API int idle_rw(network_mysqld_con* con);
 NETWORK_API int idle_ro(network_mysqld_con* con);
 NETWORK_API int change_standby_to_master(network_backends_t *bs);
+NETWORK_API int change_master(chassis *srv);
 NETWORK_API network_socket *network_connection_pool_lua_swap(network_mysqld_con *con, int backend_ndx, int need_keep_conn, int *err);
 NETWORK_API void network_conn_available_handle(int G_GNUC_UNUSED event_fd, short G_GNUC_UNUSED events, void* user_data);
 #endif

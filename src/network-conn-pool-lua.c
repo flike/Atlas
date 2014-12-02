@@ -59,7 +59,7 @@
 #define S(x) x->str, x->len
 
 /**
- * handle the events of a idling server connection in the pool 
+ * handle the events of a idling server connection in the pool
  *
  * make sure we know about connection close from the server side
  * - wait_timeout
@@ -83,7 +83,7 @@ static void network_mysqld_con_idle_handle(int event_fd, short events, void *use
 			/* the server decided to close the connection (wait_timeout, crash, ... )
 			 *
 			 * remove us from the connection pool and close the connection */
-		
+
 
 			network_connection_pool_remove(pool, pool_entry); // not in lua, so lock like lua_lock
 		}
@@ -91,8 +91,8 @@ static void network_mysqld_con_idle_handle(int event_fd, short events, void *use
 }
 
 /**
- * move the con->server into connection pool and disconnect the 
- * proxy from its backend 
+ * move the con->server into connection pool and disconnect the
+ * proxy from its backend
  */
 int network_connection_pool_lua_add_connection(network_mysqld_con *con, int is_write_sql) {
 	network_connection_pool_entry *pool_entry = NULL;
@@ -131,7 +131,7 @@ int network_connection_pool_lua_add_connection(network_mysqld_con *con, int is_w
 		event_set(&(con->server->event), con->server->fd, EV_READ, network_mysqld_con_idle_handle, pool_entry);
 		chassis_event_add_local(con->srv, &(con->server->event)); /* add a event, but stay in the same thread */
 	}
-	
+
 	g_atomic_int_dec_and_test(&(st->backend->connected_clients));
 	st->backend = NULL;
 	st->backend_ndx = -1;
@@ -141,7 +141,7 @@ int network_connection_pool_lua_add_connection(network_mysqld_con *con, int is_w
        if(thread->block_con_queue->length) {
               if (write(thread->con_write_fd, "", 1) != 1) g_message("%s:pipes - write error: %s", G_STRLOC, g_strerror(errno));
        }
-	
+
        return 0;
 }
 
@@ -312,7 +312,7 @@ network_socket* network_connection_pool_lua_swap(network_mysqld_con *con, int ba
 	 * - username has to match
 	 * - default_db should match
 	 */
-		
+
 #ifdef DEBUG_CONN_POOL
 	g_debug("%s: (swap) check if we have a connection for this user in the pool '%s'", G_STRLOC, con->client->response ? con->client->response->username->str: "empty_user");
 #endif
@@ -368,7 +368,7 @@ void network_conn_available_handle(int G_GNUC_UNUSED event_fd, short G_GNUC_UNUS
        guint index = chassis_event_thread_index_get();
        chassis_event_thread_t *thread = g_ptr_array_index(chas->threads, index);
        if (read(thread->con_read_fd, ping, 1) != 1) g_message("%s:pipes - read error,error message:%s", G_STRLOC, g_strerror(errno));
-       
+
        network_mysqld_con *con = g_queue_pop_head(thread->block_con_queue);
        if(con == NULL) return;
        network_socket* sock = network_connection_pool_lua_swap(con, con->backend_ndx, 0, &err);
@@ -401,16 +401,16 @@ int wrr_ro(network_mysqld_con *con) {
        gint backend_ndx = backend_load_balance_get(con);
        if(0 < backend_ndx) return backend_ndx;
        // set max weight if no init
-       if (rwsplit->max_weight == 0) { 
+       if (rwsplit->max_weight == 0) {
               for(i = 0; i < ndx_num; ++i) {
                      network_backend_t* backend = network_backends_get(backends, i);
                      if (backend == NULL || backend->state != BACKEND_STATE_UP) continue;
                      if (rwsplit->max_weight < backend->weight) {
                             rwsplit->max_weight = backend->weight;
                             rwsplit->cur_weight = backend->weight;
-                     }    
-              }    
-       }    
+                     }
+              }
+       }
 
        guint max_weight = rwsplit->max_weight;
        gint cur_weight = rwsplit->cur_weight;
@@ -439,20 +439,20 @@ int wrr_ro(network_mysqld_con *con) {
                      }
               }
 next:
-              if (next_ndx >= ndx_num - 1) { 
+              if (next_ndx >= ndx_num - 1) {
                      --cur_weight;
-                     next_ndx = 0; 
+                     next_ndx = 0;
 
                      if (cur_weight <= 0) cur_weight = max_weight;
               } else {
                      ++next_ndx;
-              }    
+              }
 
               if (ndx != -1) break;
-       }    
+       }
        rwsplit->cur_weight = cur_weight;
        rwsplit->next_ndx = next_ndx;
-       return ndx; 
+       return ndx;
 }
 
 int backend_load_balance_get(network_mysqld_con* con) {
@@ -461,7 +461,7 @@ int backend_load_balance_get(network_mysqld_con* con) {
        double cv, connect_value;
        network_backend_t* backend;
        network_connection_pool* pool;
-       
+
        if(con->config->max_connections == 0) return ret;
        network_backends_t* backends = con->srv->priv->backends;
        count = network_backends_count(backends);
@@ -492,7 +492,7 @@ int backend_load_balance_get(network_mysqld_con* con) {
                      }
               }
        }
-       
+
        return ret;
 }
 
@@ -536,16 +536,16 @@ int idle_ro(network_mysqld_con* con) {
               if (backend->type == BACKEND_TYPE_RO && backend->state == BACKEND_STATE_UP) {
                      if (max_conns == -1 || backend->connected_clients < max_conns) {
                             max_conns = backend->connected_clients;
-                     }    
-              }    
-       }    
+                     }
+              }
+       }
 
        return max_conns;
 }
 
 int change_standby_to_master(network_backends_t *bs) {
        int i;
-       network_backend_t *standby, *item, *m_item, *s_item, *temp_backend;
+      network_backend_t *standby, *item, *m_item, *s_item, *temp_backend;
        standby = network_get_backend_by_type(bs, BACKEND_TYPE_SY);
        if (standby != NULL && standby->state == BACKEND_STATE_UP) {
               g_mutex_lock(bs->backends_mutex);
@@ -570,4 +570,49 @@ int change_standby_to_master(network_backends_t *bs) {
               return -1;
        }
        return 0;
+}
+
+int change_master(chassis *srv) {
+        FILE *fp;
+        gchar buf[32];
+        int child_ret, ret = -1;
+        guint64 now, time_interval;
+
+        chassis_plugin *p = srv->modules->pdata[1];/*proxy plugin*/
+        chassis_plugin_config *config = p->config;
+        if(access(config->change_master_script, F_OK | X_OK)) {
+                g_message("%s: the change master script is not exist or have no permission to execute", G_STRLOC);
+                return ret;
+        }
+        if(g_atomic_int_compare_and_exchange(&(config->is_changing_master), 0, 1) == FALSE) {
+                g_message("%s:other thread is changing master, do not change.", G_STRLOC);
+                return 1;
+        }
+        time_interval = 1 * 60 * 1000 * 1000;/*one minute*/
+        now = my_timer_microseconds();
+        if(now < config->last_change_time + time_interval) {
+                g_message("%s:change master so frequently, do not change.", G_STRLOC);
+                return -2;
+        }
+        GString *command = g_string_new("sh ");
+        g_string_append(command, config->change_master_script);
+        fp = popen(command->str, "r");
+        if(fp == NULL) {
+                g_message("%s:popen error, errno = %d", G_STRLOC, errno);
+                g_string_free(command, TRUE);
+                return ret;
+        }
+        fgets(buf, sizeof(buf), fp);
+        child_ret = atoi(buf);
+        if(child_ret == 0) {
+                g_message("%s:change master successfully", G_STRLOC);
+                config->last_change_time = my_timer_microseconds();
+                ret = 0;
+        }else {
+                g_message("%s:change master unsuccessfully", G_STRLOC);
+        }
+        g_atomic_int_set(&(config->is_changing_master), 0);
+        pclose(fp);
+
+        return ret;
 }
